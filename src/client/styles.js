@@ -53,7 +53,7 @@ export const CSS = `
 }
 
 .qh-credit {
-  position: absolute; top: 14px; right: 16px; z-index: 3;
+  position: absolute; top: 14px; right: 16px; z-index: 2;
   display: flex; align-items: center; gap: 8px;
   font-size: 11px; color: var(--qh-text-3);
   pointer-events: auto;
