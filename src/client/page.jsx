@@ -149,12 +149,14 @@ function Wallpaper({ state, setState, t }) {
   };
 
   return (
-    <div className="qh-bg">
-      <div className="qh-bg-gradient" style={photo?.color ? { backgroundColor: photo.color } : undefined} />
-      {!useGradient && photo && loaded ? (
-        <img className="qh-bg-img qh-loaded" src={sizedUrl(photo, targetWidth(globalThis.innerWidth || 1600, globalThis.devicePixelRatio || 1))} alt="" />
-      ) : null}
-      <div className="qh-bg-scrim" />
+    <>
+      <div className="qh-bg">
+        <div className="qh-bg-gradient" style={photo?.color ? { backgroundColor: photo.color } : undefined} />
+        {!useGradient && photo && loaded ? (
+          <img className="qh-bg-img qh-loaded" src={sizedUrl(photo, targetWidth(globalThis.innerWidth || 1600, globalThis.devicePixelRatio || 1))} alt="" />
+        ) : null}
+        <div className="qh-bg-scrim" />
+      </div>
       <div className="qh-credit">
         {!useGradient && photo ? (
           <a href={photo.page} target="_blank" rel="noreferrer noopener">{`${photo.author} / Unsplash`}</a>
@@ -165,7 +167,7 @@ function Wallpaper({ state, setState, t }) {
           </button>
         ) : null}
       </div>
-    </div>
+    </>
   );
 }
 

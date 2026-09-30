@@ -1577,10 +1577,12 @@ function Wallpaper({ state, setState, t }) {
       setOverride((current) => pickRandom(photos, current?.id ?? photo?.id));
     }
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-bg", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-bg-gradient", style: photo?.color ? { backgroundColor: photo.color } : void 0 }),
-    !useGradient && photo && loaded ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("img", { className: "qh-bg-img qh-loaded", src: sizedUrl(photo, targetWidth(globalThis.innerWidth || 1600, globalThis.devicePixelRatio || 1)), alt: "" }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-bg-scrim" }),
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-bg", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-bg-gradient", style: photo?.color ? { backgroundColor: photo.color } : void 0 }),
+      !useGradient && photo && loaded ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("img", { className: "qh-bg-img qh-loaded", src: sizedUrl(photo, targetWidth(globalThis.innerWidth || 1600, globalThis.devicePixelRatio || 1)), alt: "" }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-bg-scrim" })
+    ] }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-credit", children: [
       !useGradient && photo ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("a", { href: photo.page, target: "_blank", rel: "noreferrer noopener", children: `${photo.author} / Unsplash` }) : null,
       !useGradient ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("wallpaper.next"), title: t("wallpaper.next"), onClick: nextPhoto, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconImage, { size: 14 }) }) : null
@@ -2016,7 +2018,7 @@ var CSS = `
 }
 
 .qh-credit {
-  position: absolute; top: 14px; right: 16px; z-index: 3;
+  position: absolute; top: 14px; right: 16px; z-index: 2;
   display: flex; align-items: center; gap: 8px;
   font-size: 11px; color: var(--qh-text-3);
   pointer-events: auto;
