@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="270" viewBox="0 0 1200 270" role="img" aria-labelledby="title desc">
+<title id="title">乔木 Home 工作路径</title><desc id="desc">从起点页搜索或进入最近会话，整理今日重点，然后进入专注。</desc>
+<rect width="1200" height="270" rx="24" fill="#111d1b"/>
+<g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">
+<text x="44" y="50" fill="#e8f3ea" font-size="24" font-weight="700">从打开 DSH，到继续工作</text>
+<text x="45" y="75" fill="#91aa99" font-size="13">A calm path from opening DeepSeek Harness to your next action</text>
+<g fill="#1b2b27" stroke="#557565" stroke-opacity=".55"><rect x="44" y="110" width="244" height="115" rx="17"/><rect x="332" y="110" width="244" height="115" rx="17"/><rect x="620" y="110" width="244" height="115" rx="17"/><rect x="908" y="110" width="244" height="115" rx="17"/></g>
+<g fill="#dceee1" font-size="18" font-weight="650"><text x="67" y="157">⌂　打开首页</text><text x="355" y="157">⌕　找到会话</text><text x="643" y="157">☑　明确今日重点</text><text x="931" y="157">◷　进入专注</text></g>
+<g fill="#9fb8a6" font-size="13"><text x="68" y="186">壁纸、问候与一眼可见的入口</text><text x="356" y="186">搜索内容或点开最近会话</text><text x="644" y="186">把重要的事放在前面</text><text x="932" y="186">计时与白噪音按需开启</text></g>
+<g fill="#99c7a9" font-size="24"><text x="302" y="177">→</text><text x="590" y="177">→</text><text x="878" y="177">→</text></g>
+</g>
+</svg>

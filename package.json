@@ -1,0 +1,48 @@
+{
+  "name": "qiaomu-home-dsh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "乔木 Home：DeepSeek Harness 的起点页插件——壁纸与问候、会话搜索、今日待办、最近会话、常用入口、专注计时、时间进度、世界时钟、每日一句与天气。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --loader ./test/jsx-loader.mjs --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    },
+    "meta": {
+      "title": "乔木 Home",
+      "description": "DSH 的起点页：壁纸问候、会话搜索、待办、最近会话、快捷入口与专注小组件。"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
+  "license": "GPL-3.0-only",
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

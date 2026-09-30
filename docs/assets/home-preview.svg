@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="820" viewBox="0 0 1440 820" role="img" aria-labelledby="title desc">
+<title id="title">乔木 Home 界面示意</title>
+<desc id="desc">DeepSeek Harness 侧栏中的乔木 Home 起点页：问候、搜索、今日重点、待办、最近会话和常用入口。此图为按当前界面结构绘制的示意，不是真实运行截图。</desc>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#27433e"/><stop offset=".48" stop-color="#172d2d"/><stop offset="1" stop-color="#0f1918"/></linearGradient>
+  <radialGradient id="glow"><stop stop-color="#69917d" stop-opacity=".50"/><stop offset="1" stop-color="#69917d" stop-opacity="0"/></radialGradient>
+  <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1d2b29" stop-opacity=".94"/><stop offset="1" stop-color="#15211f" stop-opacity=".90"/></linearGradient>
+  <filter id="shadow"><feDropShadow dx="0" dy="22" stdDeviation="30" flood-color="#000" flood-opacity=".3"/></filter>
+</defs>
+<rect width="1440" height="820" fill="#0d1514"/>
+<circle cx="1050" cy="94" r="580" fill="url(#glow)"/>
+<circle cx="322" cy="720" r="440" fill="url(#glow)" opacity=".3"/>
+<rect x="37" y="36" width="1366" height="748" rx="24" fill="url(#bg)" stroke="#ffffff" stroke-opacity=".14" filter="url(#shadow)"/>
+<path d="M61 36h235v748H61a24 24 0 0 1-24-24V60a24 24 0 0 1 24-24Z" fill="#111c1b" fill-opacity=".88"/>
+<path d="M296 36v748" stroke="#ffffff" stroke-opacity=".12"/>
+<circle cx="75" cy="71" r="6" fill="#e3a69c"/><circle cx="96" cy="71" r="6" fill="#e8c48b"/><circle cx="117" cy="71" r="6" fill="#9dc7ae"/>
+<text x="68" y="126" fill="#e8f0ea" font-size="20" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">DeepSeek Harness</text>
+<text x="70" y="185" fill="#91aa9d" font-size="12" letter-spacing="2" font-family="Arial,sans-serif">WORKSPACE</text>
+<rect x="56" y="211" width="219" height="43" rx="11" fill="#a9d5b7" fill-opacity=".15" stroke="#b5dfbe" stroke-opacity=".18"/>
+<text x="75" y="239" fill="#c7e8d1" font-size="15" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">⌂　乔木 Home</text>
+<text x="75" y="293" fill="#b9c9bf" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">▤　最近会话</text>
+<text x="75" y="339" fill="#b9c9bf" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">▦　工作区</text>
+<path d="M58 375h217" stroke="#ffffff" stroke-opacity=".10"/>
+<text x="70" y="409" fill="#8eaa9b" font-size="12" letter-spacing="2" font-family="Arial,sans-serif">QIAOMU</text>
+<text x="75" y="455" fill="#b9c9bf" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">◉　乔木 RSS</text>
+<text x="75" y="499" fill="#b9c9bf" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">◈　乔木阅读</text>
+<text x="75" y="543" fill="#b9c9bf" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">♫　乔木电台</text>
+<text x="344" y="119" fill="#bed1c4" font-size="14" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">09:41 · 星期三 · 早上好</text>
+<text x="344" y="180" fill="#f0f6f0" font-size="41" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">今天，从这里开始。</text>
+<text x="346" y="212" fill="#b4c9b9" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">继续一段对话，记下眼前的事，再进入专注。</text>
+<rect x="344" y="243" width="573" height="54" rx="13" fill="#13211f" fill-opacity=".88" stroke="#d8eedb" stroke-opacity=".18"/>
+<text x="366" y="277" fill="#839e8b" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">⌕　搜索会话内容…</text>
+<rect x="929" y="243" width="172" height="54" rx="13" fill="#b6dbc1"/>
+<text x="961" y="276" fill="#173026" font-size="15" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">＋　新建会话</text>
+<rect x="1113" y="243" width="238" height="54" rx="13" fill="#172522" stroke="#d8eedb" stroke-opacity=".16"/>
+<text x="1144" y="276" fill="#dceadf" font-size="15" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">▣　打开工作区</text>
+<text x="352" y="352" fill="#f2f7f2" font-size="16" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">主页</text>
+<text x="430" y="352" fill="#9fb6a5" font-size="16" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">记录</text>
+<text x="505" y="352" fill="#9fb6a5" font-size="16" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">专注</text>
+<text x="580" y="352" fill="#9fb6a5" font-size="16" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">探索</text>
+<path d="M344 369h44" stroke="#bce0c6" stroke-width="3" stroke-linecap="round"/>
+<g fill="url(#glass)" stroke="#ffffff" stroke-opacity=".11">
+  <rect x="344" y="394" width="489" height="169" rx="17"/>
+  <rect x="851" y="394" width="500" height="169" rx="17"/>
+  <rect x="344" y="579" width="489" height="163" rx="17"/>
+  <rect x="851" y="579" width="500" height="163" rx="17"/>
+</g>
+<g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">
+  <text x="369" y="427" fill="#d8e8db" font-size="16" font-weight="650">◎　今日重点</text>
+  <text x="370" y="468" fill="#f0f6f0" font-size="14">○　完成插件首页的发布说明</text>
+  <text x="370" y="505" fill="#f0f6f0" font-size="14">○　继续昨天的产品讨论</text>
+  <text x="877" y="427" fill="#d8e8db" font-size="16" font-weight="650">☑　今日待办</text>
+  <text x="879" y="468" fill="#f0f6f0" font-size="14">□　整理工作区笔记</text>
+  <text x="879" y="505" fill="#f0f6f0" font-size="14">□　回复未完成的会话</text>
+  <text x="369" y="613" fill="#d8e8db" font-size="16" font-weight="650">▤　最近会话</text>
+  <text x="370" y="651" fill="#f0f6f0" font-size="14">产品方向与下一步</text>
+  <text x="724" y="651" fill="#9fb7a6" font-size="12">2 小时前</text>
+  <text x="370" y="689" fill="#f0f6f0" font-size="14">阅读插件的体验细节</text>
+  <text x="724" y="689" fill="#9fb7a6" font-size="12">昨天</text>
+  <text x="877" y="613" fill="#d8e8db" font-size="16" font-weight="650">↗　常用入口</text>
+  <rect x="878" y="635" width="136" height="69" rx="11" fill="#dceedd" fill-opacity=".08"/>
+  <rect x="1025" y="635" width="136" height="69" rx="11" fill="#dceedd" fill-opacity=".08"/>
+  <text x="892" y="678" fill="#e2eee3" font-size="13">＋　新会话</text>
+  <text x="1039" y="678" fill="#e2eee3" font-size="13">▣　工作区</text>
+</g>
+<rect x="1054" y="56" width="312" height="32" rx="16" fill="#10211c" fill-opacity=".82" stroke="#c9e4cf" stroke-opacity=".22"/>
+<text x="1073" y="77" fill="#d6e7d9" font-size="12" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif">界面示意 · Illustration, not screenshot</text>
+</svg>

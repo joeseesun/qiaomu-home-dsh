@@ -1,0 +1,5 @@
+# 乔木 Home · 宿主插件行
+# 由 plugin_manager install_bundle 安装到当前 profile 后生效。
+- insert:
+    - id: qiaomu-home
+      name: 'qiaomu-home-dsh'
