@@ -223,3 +223,17 @@ export const IconTarget = makeIcon([
 ]);
 
 export const IconZap = makeIcon(['M13 2 3 14h9l-1 8 10-12h-9l1-8z']);
+
+export const IconMore = makeIcon(['M12 12h.01', 'M19 12h.01', 'M5 12h.01']);
+export const IconGrip = makeIcon(['M9 5h.01', 'M9 12h.01', 'M9 19h.01', 'M15 5h.01', 'M15 12h.01', 'M15 19h.01']);
+export const IconArrowUp = makeIcon(['m5 12 7-7 7 7', 'M12 19V5']);
+export const IconArrowDown = makeIcon(['M12 5v14', 'm19 12-7 7-7-7']);
+export const IconArrowLeft = makeIcon(['m12 19-7-7 7-7', 'M19 12H5']);
+export const IconArrowRight = makeIcon(['M5 12h14', 'm12 5 7 7-7 7']);
+export const IconBriefcase = makeIcon(['M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16', 'M20 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2Z']);
+export const IconBook = makeIcon(['M12 7v14', 'M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z']);
+export const IconCompass = makeIcon(['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'm16.24 7.76-1.8 5.4a2 2 0 0 1-1.28 1.28l-5.4 1.8 1.8-5.4a2 2 0 0 1 1.28-1.28z']);
+export const IconSquareDashed = makeIcon(['M5 3a2 2 0 0 0-2 2', 'M19 3a2 2 0 0 1 2 2', 'M21 19a2 2 0 0 1-2 2', 'M5 21a2 2 0 0 1-2-2', 'M9 3h1', 'M9 21h1', 'M14 3h1', 'M14 21h1', 'M3 9v1', 'M21 9v1', 'M3 14v1', 'M21 14v1']);
+export const IconMinusCircle = makeIcon(['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M8 12h8']);
+export const IconPanels = makeIcon(['M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z', 'M3 9h18', 'M9 21V9']);
+export const IconSliders = makeIcon(['M4 21v-7', 'M4 10V3', 'M12 21v-9', 'M12 8V3', 'M20 21v-5', 'M20 12V3', 'M2 14h4', 'M10 8h4', 'M18 16h4']);

@@ -19,6 +19,11 @@ const reactStub = {
   useMemo: (fn) => fn(),
   useRef: (value) => ({ current: value ?? null }),
   useSyncExternalStore: (_sub, get) => get(),
+  createContext: (value) => ({ Provider: Symbol('Provider'), _value: value }),
+  useContext: (context) => context._value,
+  useCallback: (fn) => fn,
+  useLayoutEffect: () => {},
+  useId: () => ':r0:',
   StrictMode: Symbol('StrictMode'),
   Fragment: Symbol('Fragment'),
 };

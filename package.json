@@ -1,8 +1,11 @@
 {
   "name": "qiaomu-home-dsh",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
+  "engines": {
+    "dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
   "description": "乔木 Home：DeepSeek Harness 的起点页插件——壁纸与问候、会话搜索、今日待办、最近会话、常用入口、专注计时、时间进度、世界时钟、每日一句与天气。",
   "exports": {
     ".": "./index.js",
@@ -22,7 +25,8 @@
     "build": "node scripts/build.mjs",
     "test": "node --loader ./test/jsx-loader.mjs --test test/*.test.mjs",
     "prepack": "npm run build && node scripts/verify-package.mjs",
-    "check": "npm run build && npm test && node scripts/verify-package.mjs"
+    "check": "npm run build && npm test && node scripts/verify-package.mjs",
+    "harness": "node scripts/harness.mjs"
   },
   "dsh": {
     "bundle": {
@@ -39,7 +43,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4"
+    "@deepseek-ai/cordis": "~4.0.5"
   },
   "license": "GPL-3.0-only",
   "devDependencies": {

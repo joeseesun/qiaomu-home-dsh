@@ -134,6 +134,59 @@ export function weatherUrl(city) {
   return `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
 }
 
+/** 中文地名补全「市/县/区」等变体，提高 geocoding 命中率（对标原版 weather-location.ts）。 */
+export function weatherQueryVariants(query) {
+  const value = String(query ?? '').trim().slice(0, 100);
+  if (!value) return [];
+  if (!/^[\u3400-\u9fff]+$/.test(value)) return [value];
+  const base = value.replace(/(?:省|市|县|区)$/u, '');
+  return [...new Set([value, base, `${base}市`, `${base}县`, `${base}区`])].slice(0, 5);
+}
+
+/** Open-Meteo geocoding 返回 → 可选地点列表（含省/国家细节，最多 12 条）。 */
+export function parseGeocoding(json) {
+  const results = json?.results;
+  if (!Array.isArray(results)) return [];
+  return results
+    .filter((item) => item && typeof item.name === 'string'
+      && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)
+      && Math.abs(item.latitude) <= 90 && Math.abs(item.longitude) <= 180)
+    .map((item) => ({
+      name: item.name,
+      latitude: item.latitude,
+      longitude: item.longitude,
+      detail: [...new Set([item.admin2, item.admin1, item.country].filter((value) => typeof value === 'string' && value))].join(' · '),
+    }))
+    .slice(0, 12);
+}
+
+/** 地名搜索地址（Open-Meteo geocoding）。 */
+export function geocodingUrl(name, lang = 'zh') {
+  const params = new URLSearchParams({ name, count: '12', language: lang, format: 'json' });
+  return `https://geocoding-api.open-meteo.com/v1/search?${params.toString()}`;
+}
+
+/** 地名 → 地点列表：并行查中文变体，按「名字+坐标」去重（对标原版 searchWeatherPlaces）。 */
+export async function searchWeatherPlaces(query, lang = 'zh', fetchImpl = globalThis.fetch) {
+  const variants = weatherQueryVariants(query);
+  if (!variants.length) return [];
+  const responses = await Promise.allSettled(variants.map(async (name) => {
+    const response = await fetchImpl(geocodingUrl(name, lang));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return parseGeocoding(await response.json());
+  }));
+  if (responses.every((entry) => entry.status === 'rejected')) throw new Error('Location search unavailable');
+  const unique = new Map();
+  for (const entry of responses) {
+    if (entry.status !== 'fulfilled') continue;
+    for (const place of entry.value) {
+      const key = `${place.name}:${place.latitude.toFixed(3)}:${place.longitude.toFixed(3)}`;
+      if (!unique.has(key)) unique.set(key, place);
+    }
+  }
+  return [...unique.values()].slice(0, 12);
+}
+
 const WEATHER_KINDS = [
   [[0], ['晴', 'Clear'], 'sun'],
   [[1, 2], ['多云间晴', 'Partly cloudy'], 'cloud-sun'],
@@ -397,15 +450,163 @@ export const DAILY_QUESTIONS = {
   ],
 };
 
-/** 多站搜索引擎。 */
-export const SEARCH_ENGINES = [
-  { id: 'google', zh: '谷歌', en: 'Google', url: 'https://www.google.com/search?q=' },
-  { id: 'bing', zh: '必应', en: 'Bing', url: 'https://www.bing.com/search?q=' },
-  { id: 'baidu', zh: '百度', en: 'Baidu', url: 'https://www.baidu.com/s?wd=' },
-  { id: 'duckduckgo', zh: 'DuckDuckGo', en: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=' },
-  { id: 'github', zh: 'GitHub', en: 'GitHub', url: 'https://github.com/search?q=' },
-  { id: 'zhihu', zh: '知乎', en: 'Zhihu', url: 'https://www.zhihu.com/search?type=content&q=' },
+/** 多站搜索的站点分组（对标原版 discovery.ts 的目录，中文译英文等智能目标语言一致）。 */
+export const SEARCH_GROUPS = [
+  {
+    id: 'web',
+    zh: '多站搜索', en: 'Search across sites',
+    sites: [
+      { id: 'google', zh: '谷歌', en: 'Google', home: 'https://www.google.com/', search: (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}` },
+      { id: 'bing', zh: '必应', en: 'Bing', home: 'https://www.bing.com/', search: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}` },
+      { id: 'duckduckgo', zh: 'DuckDuckGo', en: 'DuckDuckGo', home: 'https://duckduckgo.com/', search: (q) => `https://duckduckgo.com/?q=${encodeURIComponent(q)}` },
+      { id: 'wikipedia', zh: '维基百科', en: 'Wikipedia', home: 'https://www.wikipedia.org/', search: (q) => `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(q)}` },
+      { id: 'baidu', zh: '百度', en: 'Baidu', off: true, home: 'https://www.baidu.com/', search: (q) => `https://www.baidu.com/s?wd=${encodeURIComponent(q)}` },
+      { id: 'brave', zh: 'Brave', en: 'Brave', off: true, home: 'https://search.brave.com/', search: (q) => `https://search.brave.com/search?q=${encodeURIComponent(q)}` },
+      { id: 'github', zh: 'GitHub', en: 'GitHub', off: true, home: 'https://github.com/', search: (q) => `https://github.com/search?q=${encodeURIComponent(q)}` },
+      { id: 'zhihu', zh: '知乎', en: 'Zhihu', off: true, home: 'https://www.zhihu.com/', search: (q) => `https://www.zhihu.com/search?type=content&q=${encodeURIComponent(q)}` },
+    ],
+  },
+  {
+    id: 'books',
+    zh: '找电子书', en: 'Find books',
+    sites: [
+      { id: 'openlibrary', zh: 'Open Library', en: 'Open Library', home: 'https://openlibrary.org/', search: (q) => `https://openlibrary.org/search?q=${encodeURIComponent(q)}` },
+      { id: 'gutenberg', zh: '古腾堡计划', en: 'Project Gutenberg', home: 'https://www.gutenberg.org/', search: (q) => `https://www.gutenberg.org/ebooks/?query=${encodeURIComponent(q)}` },
+      { id: 'douban-book', zh: '豆瓣读书', en: 'Douban Books', home: 'https://book.douban.com/', search: (q) => `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(q)}` },
+      { id: 'google-books', zh: 'Google 图书', en: 'Google Books', home: 'https://books.google.com/', search: (q) => `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(q)}` },
+    ],
+  },
+  {
+    id: 'video',
+    zh: '找视频与电影', en: 'Find video and film',
+    sites: [
+      { id: 'youtube', zh: 'YouTube', en: 'YouTube', home: 'https://www.youtube.com/', search: (q) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}` },
+      { id: 'bilibili', zh: '哔哩哔哩', en: 'Bilibili', home: 'https://www.bilibili.com/', search: (q) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(q)}` },
+      { id: 'imdb', zh: 'IMDb', en: 'IMDb', home: 'https://www.imdb.com/', search: (q) => `https://www.imdb.com/find/?q=${encodeURIComponent(q)}` },
+      { id: 'douban-movie', zh: '豆瓣电影', en: 'Douban Movies', home: 'https://movie.douban.com/', search: (q) => `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(q)}` },
+      { id: 'justwatch', zh: 'JustWatch', en: 'JustWatch', home: 'https://www.justwatch.com/', search: (q) => `https://www.justwatch.com/us/search?q=${encodeURIComponent(q)}` },
+    ],
+  },
+  {
+    id: 'music',
+    zh: 'Spotify 搜索', en: 'Search Spotify',
+    sites: [
+      { id: 'spotify', zh: 'Spotify', en: 'Spotify', home: 'https://open.spotify.com/', search: (q) => `https://open.spotify.com/search/${encodeURIComponent(q)}` },
+    ],
+  },
+  {
+    id: 'ai',
+    zh: '学 AI', en: 'Learn AI',
+    sites: [
+      { id: 'openai-academy', zh: 'OpenAI Academy', en: 'OpenAI Academy', home: 'https://academy.openai.com/' },
+      { id: 'hf-learn', zh: 'Hugging Face Learn', en: 'Hugging Face Learn', home: 'https://huggingface.co/learn' },
+      { id: 'deeplearning-ai', zh: 'DeepLearning.AI', en: 'DeepLearning.AI', home: 'https://www.deeplearning.ai/short-courses/' },
+      { id: 'fast-ai', zh: 'fast.ai', en: 'fast.ai', home: 'https://course.fast.ai/' },
+    ],
+  },
+  {
+    id: 'papers',
+    zh: '找论文', en: 'Find papers',
+    sites: [
+      { id: 'arxiv', zh: 'arXiv', en: 'arXiv', home: 'https://arxiv.org/', search: (q) => `https://arxiv.org/search/?query=${encodeURIComponent(q)}&searchtype=all` },
+      { id: 'crossref', zh: 'Crossref', en: 'Crossref', home: 'https://search.crossref.org/', search: (q) => `https://search.crossref.org/?q=${encodeURIComponent(q)}` },
+      { id: 'semantic-scholar', zh: 'Semantic Scholar', en: 'Semantic Scholar', home: 'https://www.semanticscholar.com/', search: (q) => `https://www.semanticscholar.org/search?q=${encodeURIComponent(q)}` },
+      { id: 'google-scholar', zh: 'Google 学术', en: 'Google Scholar', home: 'https://scholar.google.com/', search: (q) => `https://scholar.google.com/scholar?q=${encodeURIComponent(q)}` },
+    ],
+  },
+  {
+    id: 'words',
+    zh: '查词', en: 'Look up a word',
+    sites: [
+      { id: 'cambridge', zh: '剑桥词典', en: 'Cambridge Dictionary', home: 'https://dictionary.cambridge.org/', search: (q) => `https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(q)}` },
+      { id: 'wiktionary', zh: '维基词典', en: 'Wiktionary', home: 'https://en.wiktionary.org/', search: (q) => `https://en.wiktionary.org/w/index.php?search=${encodeURIComponent(q)}` },
+      { id: 'youdao', zh: '有道词典', en: 'Youdao', home: 'https://dict.youdao.com/', search: (q) => `https://dict.youdao.com/result?word=${encodeURIComponent(q)}&lang=en` },
+      { id: 'merriam-webster', zh: '韦氏词典', en: 'Merriam-Webster', home: 'https://www.merriam-webster.com/', search: (q) => `https://www.merriam-webster.com/dictionary/${encodeURIComponent(q)}` },
+    ],
+  },
+  {
+    id: 'translate',
+    zh: '翻译', en: 'Translate',
+    sites: [
+      { id: 'google-translate', zh: 'Google 翻译', en: 'Google Translate', home: 'https://translate.google.com/', search: (q) => `https://translate.google.com/?sl=auto&tl=${translateTarget(q)}&text=${encodeURIComponent(q)}&op=translate` },
+      { id: 'deepl', zh: 'DeepL', en: 'DeepL', home: 'https://www.deepl.com/translator', search: (q) => `https://www.deepl.com/translator#auto/${translateTarget(q)}/${encodeURIComponent(q).replace(/%2F/gi, '%5C%2F')}` },
+      { id: 'bing-translate', zh: '必应翻译', en: 'Bing Translator', home: 'https://www.bing.com/translator', search: (q) => `https://www.bing.com/translator?from=auto-detect&to=${translateTarget(q) === 'zh' ? 'zh-Hans' : 'en'}&text=${encodeURIComponent(q)}` },
+    ],
+  },
+  {
+    id: 'dev',
+    zh: 'GitHub 待办', en: 'GitHub inbox',
+    sites: [
+      { id: 'github-search', zh: '搜索仓库', en: 'Search repositories', home: 'https://github.com/search', search: (q) => `https://github.com/search?q=${encodeURIComponent(q)}&type=repositories` },
+      { id: 'github-reviews', zh: '待我审阅', en: 'Review requests', home: 'https://github.com/pulls/review-requested' },
+      { id: 'github-pulls', zh: '我的 PR', en: 'My pull requests', home: 'https://github.com/pulls' },
+      { id: 'github-issues', zh: '分配给我', en: 'Assigned issues', home: 'https://github.com/issues/assigned' },
+      { id: 'github-notifications', zh: '通知', en: 'Notifications', home: 'https://github.com/notifications' },
+    ],
+  },
 ];
+
+/** 中文译成英文，其他语言译成中文（与原版 translateTarget 一致）。 */
+export function translateTarget(text) {
+  return /[\u3400-\u9fff]/.test(text) ? 'en' : 'zh';
+}
+
+/** 有查询且有 search 模板才拼查询串，否则打开站点首页（dev 组的收件页因此总是打开首页）。 */
+export function discoveryUrl(site, query) {
+  return query.trim() && site.search ? site.search(query.trim().slice(0, 300)) : site.home;
+}
+
+/** 组内站点：自定义模板追加到「多站搜索」组。 */
+export function groupSites(groupId, customSites = []) {
+  const group = SEARCH_GROUPS.find((entry) => entry.id === groupId);
+  if (!group) return [];
+  return groupId === 'web' ? [...group.sites, ...customSites] : group.sites;
+}
+
+/** 组内默认选中的站点：目录未标记 off 的；全是 off 时取第一个。 */
+export function defaultSiteIds(groupId, customSites = []) {
+  const sites = groupSites(groupId, customSites);
+  const on = sites.filter((site) => !site.off);
+  return (on.length ? on : sites.slice(0, 1)).map((site) => site.id);
+}
+
+/**
+ * 解析自定义搜索模板：每行「名称 | https://example.com/?q={query}」，最多 8 行。
+ * 成功返回 { ok: true, sites }；失败返回 { ok: false, error: { key, params } }。
+ */
+export function parseSearchTemplates(input) {
+  const lines = String(input ?? '').split(/\r?\n/).filter((line) => line.trim()).slice(0, 8);
+  const sites = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const separator = line.indexOf('|');
+    const name = line.slice(0, separator).trim();
+    const url = line.slice(separator + 1).trim();
+    if (separator < 1 || !name || !url.includes('{query}')) {
+      return { ok: false, error: { key: 'multiSearch.templateLine', params: { line: index + 1 } } };
+    }
+    let parsed;
+    try {
+      parsed = new URL(url.replaceAll('{query}', 'test'));
+    } catch {
+      return { ok: false, error: { key: 'multiSearch.templateLine', params: { line: index + 1 } } };
+    }
+    if (parsed.origin !== new URL(url.replaceAll('{query}', 'other')).origin) {
+      return { ok: false, error: { key: 'multiSearch.templateQuery', params: { line: index + 1 } } };
+    }
+    if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+      return { ok: false, error: { key: 'multiSearch.templateUrl', params: { line: index + 1 } } };
+    }
+    sites.push({
+      id: `custom:${url}`,
+      zh: name.slice(0, 60),
+      en: name.slice(0, 60),
+      home: new URL(url.replaceAll('{query}', '')).origin,
+      search: (query) => url.replaceAll('{query}', encodeURIComponent(query)),
+    });
+  }
+  return { ok: true, sites };
+}
 
 /** 会话活动：dayKey → 当天活跃会话数。 */
 export function activityByDay(byId) {
