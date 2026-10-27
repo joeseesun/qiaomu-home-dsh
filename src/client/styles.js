@@ -141,6 +141,9 @@ export const CSS = `
   backdrop-filter: blur(12px);
   transition: background 0.15s ease, color 0.15s ease;
 }
+.qh-split { display:flex; }
+.qh-root .qh-split .qh-new { border-top-right-radius:0; border-bottom-right-radius:0; }
+.qh-root .qh-split .qh-new-more { margin-left:-1px; padding:0 10px; border-top-left-radius:0; border-bottom-left-radius:0; color:var(--qh-text-2); }
 .qh-action-btn:hover { background: rgba(34, 46, 40, 0.8); color: var(--qh-text); }
 .qh-action-btn.qh-primary { color: var(--qh-accent); }
 

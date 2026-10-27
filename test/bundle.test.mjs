@@ -68,6 +68,7 @@ test('client.js 在模拟环境中加载并注册 Slot', async () => {
       this.effects.push(label);
       fn();
     },
+    provide(name,value) { this[name]=value; return ()=>{delete this[name];}; },
     get: () => undefined,
     locale: {
       register(ns, dict) {

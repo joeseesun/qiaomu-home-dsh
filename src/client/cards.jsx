@@ -102,10 +102,10 @@ export function useNow(intervalMs = 30000) {
 export const CardChromeContext = React.createContext(null);
 
 /** 卡片骨架：头部图标 + 标题 + 计数 + 头部动作。 */
-export function Card({ icon: Icon, title, count, actions, children }) {
+export function Card({ icon: Icon, title, count, actions, children, sourceId }) {
   const chrome = React.useContext(CardChromeContext);
   return (
-    <section className="qh-card">
+    <section className="qh-card" data-source={sourceId}>
       <header className="qh-card-head">
         {chrome?.handle}
         <Icon size={15} />

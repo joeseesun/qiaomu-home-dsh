@@ -144,3 +144,11 @@ In DSH, ask its plugin manager to run `install_bundle` with the clone's absolute
 Personal Home data stays in this DSH browser environment's `localStorage` under the retained key `dsh-qiaomu-home:v1`; it does not sync across devices or workspaces. Conversation search uses DSH's local service. Wallpapers contact Unsplash, shortcut favicons contact DuckDuckGo Icons, and weather contacts Open-Meteo (geocoding and forecast) only after you search for or pick a place. External searches open only when submitted. Ambient noise is generated locally.
 
 Local verification covers the build, automated tests, and installation into a desktop profile. A fresh in-app reload, real screenshot, and mobile behavior remain unverified. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the [GPL-3.0-only license](LICENSE).
+
+## 0.3.0：原版 Home 插件联动
+
+通过 Harness 原生 `qiaomuHome` 服务接入原版 v1 provider 数据协议。来源卡片直接沿用原 Home 列表结构、缩略图、进度与操作样式；卡片在组件库中添加，来源暂时离线时保留布局。搜索同时包含来源结果，快捷操作进入原版分体按钮的下拉菜单。
+
+已与 `qiaomu-ui-learn-dsh` 验证最近设计、全局检索和原版详情跳转；其他插件提供相同协议即可接入。独立来源超时或出错不会阻断主页。新增协议和渲染检查后，共 50 项测试通过。
+
+Native integrations register a provider using `ctx.inject(['qiaomuHome'], ctx => ctx.effect(() => ctx.qiaomuHome.register('my-plugin', provider)))`. The provider follows the original `qiaomu-home` v1 sections/actions/search contract. An optional `subscribe(listener)` returns its cleanup function. Registrations and subscriptions are removed with their owning plugin; saved card IDs remain available for reconnection.

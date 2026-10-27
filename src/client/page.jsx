@@ -2,6 +2,9 @@
  * 起点页主页面：壁纸背景、问候与时间、会话搜索、页签与卡片网格、设置弹层。
  */
 import React from 'react';
+import {ProviderIcon} from './provider-icons.jsx';
+import {ProviderCard} from './provider-card.jsx';
+import {isProviderCard,emptyProviderStore} from './providers.js';
 import { curatedPhotos, dailyIndex, dayKey, sizedUrl, targetWidth } from './data.js';
 import {
   AmbientCard,
@@ -176,7 +179,7 @@ function SessionSearch({ t, services }) {
 
   useEffect(() => {
     const value = query.trim();
-    if (!value || !services.sessions?.search) {
+    if (!value) {
       setResults(null);
       return;
     }
@@ -185,26 +188,25 @@ function SessionSearch({ t, services }) {
     setActive(0);
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      services.sessions
-        .search(value, controller.signal)
-        .then((result) => {
-          if (seqRef.current !== seq || controller.signal.aborted) return;
-          setResults(result?.ok ? { items: (result.value?.items ?? []).slice(0, 8) } : 'error');
-        })
-        .catch(() => {
-          if (seqRef.current === seq && !controller.signal.aborted) setResults('error');
-        });
+      Promise.all([
+        services.sessions?.search?.(value,controller.signal).catch(()=>null)??Promise.resolve(null),
+        services.providers?.search?.(value,8,controller.signal)??Promise.resolve([]),
+      ]).then(([result,provided])=>{
+        if(seqRef.current!==seq||controller.signal.aborted)return;
+        const sessions=result?.ok?(result.value?.items??[]).slice(0,8):[];
+        setResults(!provided.length && services.sessions?.search && !result?.ok ? 'error' : {items:[...provided,...sessions].slice(0,12)});
+      }).catch(()=>{if(seqRef.current===seq&&!controller.signal.aborted)setResults('error');});
     }, 250);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, services.sessions]);
+  }, [query, services.sessions,services.providers]);
 
   const items = results && results !== 'loading' && results !== 'error' ? results.items : [];
   const open = (item) => {
     if (!item) return;
-    services.uiWorkspace?.openSession?.(item.sessionId);
+    if(item.providerItem)void Promise.resolve().then(item.open).catch(()=>setResults('error'));else services.uiWorkspace?.openSession?.(item.sessionId);
     setQuery('');
     setResults(null);
   };
@@ -229,6 +231,7 @@ function SessionSearch({ t, services }) {
   };
 
   const titleOf = (item) => {
+    if(item.providerItem)return item.title;
     const row = services.sessions?.list?.getSnapshot?.().byId?.[item.sessionId];
     return row?.title?.trim() || item.snippet?.slice(0, 40) || t('recent.untitled');
   };
@@ -285,6 +288,8 @@ const CARD_RENDERERS = {
 
 export function HomePage({ t, store, services }) {
   const state = useStore(store);
+  const providerState=useStore(services?.providers||emptyProviderStore);
+  useEffect(()=>{void services?.providers?.refresh();},[services?.providers]);
   const setState = (patch) => store.set(patch);
   const now = useNow(30000);
   const lang = langOf(t);
@@ -384,7 +389,7 @@ export function HomePage({ t, store, services }) {
   };
 
   /* ---- 组件操作 ---- */
-  const cardName = (id) => cardTitle(id, t, state.shortcutGroups);
+  const cardName = (id) => providerState.sections.find(s=>s.cardId===id)?.title || (isProviderCard(id)?id.split(':').at(-1):cardTitle(id, t, state.shortcutGroups));
   const shift = (id, delta) => {
     const from = tab.cards.indexOf(id);
     const to = from + delta;
@@ -481,7 +486,7 @@ export function HomePage({ t, store, services }) {
   const cardProps = { t, lang, state, setState, services };
   const renderCard = (id) => {
     const groupId = groupIdOf(id);
-    const Component = groupId ? ShortcutGroupCard : CARD_RENDERERS[id];
+    const Component = groupId ? ShortcutGroupCard : isProviderCard(id) ? ProviderCard : CARD_RENDERERS[id];
     if (!Component) return null;
     const name = cardName(id);
     const menuButton = (
@@ -512,7 +517,7 @@ export function HomePage({ t, store, services }) {
     return (
       <div key={id} className="qh-slot" data-card={id} {...(editing ? dropTarget('card', id, 'y') : {})} {...markerProps('card', id)}>
         <CardChromeContext.Provider value={{ handle, menu: menuButton, editing, openMenu, openDialog: setDialog, commit }}>
-          <Component {...cardProps} {...cardOptions(tab, id)} {...(groupId ? { groupId } : {})} />
+          <Component cardId={id} {...cardProps} {...cardOptions(tab, id)} {...(groupId ? { groupId } : {})} />
         </CardChromeContext.Provider>
       </div>
     );
@@ -574,10 +579,11 @@ export function HomePage({ t, store, services }) {
           <h1 className="qh-headline">{state.headline.trim() || t('hero.headline')}</h1>
           <div className="qh-search-row">
             <SessionSearch t={t} services={services} />
-            <button type="button" className="qh-action-btn qh-primary" onClick={() => services.uiWorkspace?.startSession?.()}>
+            <div className="qh-split"><button type="button" className={`qh-action-btn qh-primary${providerState.actions.length?" qh-new":""}`} onClick={() => services.uiWorkspace?.startSession?.()}>
               <IconPlus size={14} />
               {t('search.newSession')}
             </button>
+            {providerState.actions.length?<button type="button" className="qh-action-btn qh-new-more" aria-label={t('provider.actions')} aria-haspopup="menu" onClick={event=>openMenu(event,providerState.actions.map(action=>({label:action.label,icon:props=><ProviderIcon name={action.icon} {...props}/>,onSelect:()=>void Promise.resolve().then(action.run).catch(e=>push(e.message||t('search.error')))})))}><IconArrowDown size={14}/></button>:null}</div>
             <button
               type="button"
               className="qh-action-btn"
@@ -596,6 +602,7 @@ export function HomePage({ t, store, services }) {
               {t('search.openWorkspace')}
             </button>
           </div>
+
           <div className="qh-search-hint">{t('search.hint')}</div>
         </div>
 
