@@ -1,6 +1,6 @@
 {
   "name": "qiaomu-home-dsh",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -19,7 +19,13 @@
     "client.js",
     "cordis.patch.yml",
     "icon.svg",
-    "locale/*.json"
+    "locale/*.json",
+    "vendor/qiaomu-home/LICENSE",
+    "vendor/qiaomu-home/NOTICE",
+    "vendor/qiaomu-home/source.json",
+    "vendor/qiaomu-home/patches.json",
+    "vendor/qiaomu-audio/LICENSE",
+    "vendor/qiaomu-audio/NOTICE"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -43,11 +49,14 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.5"
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.2"
   },
   "license": "GPL-3.0-only",
   "devDependencies": {
     "esbuild": "^0.28.1",
+    "jsdom": "26.0.0",
+    "lucide": "1.47.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -65,5 +74,18 @@
     "qiaomu",
     "productivity",
     "start-page"
-  ]
+  ],
+  "dependencies": {
+    "marked": "18.0.11",
+    "moment": "2.31.0",
+    "yaml": "2.9.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    }
+  }
 }

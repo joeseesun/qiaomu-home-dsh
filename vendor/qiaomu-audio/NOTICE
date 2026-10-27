@@ -1,0 +1,5 @@
+Storage and OS credential adapters derived from Qiaomu Audio for DeepSeek Harness 0.1.3.
+Source: https://github.com/joeseesun/qiaomu-audio-dsh
+Commit: 528efc073911fbdecfb4b126eb161661542ee448
+License: GPL-3.0-only (see LICENSE)
+Adapted with a separate Home credential service, account prefix and storage directory. No Audio settings or credentials are read.

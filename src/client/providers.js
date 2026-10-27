@@ -27,6 +27,7 @@ export function createProviderRegistry() {
   return {
     protocol: 'qiaomu-home', version: 1,
     getSnapshot: () => snapshot,
+    originalSources: () => [...providers.values()].map(entry=>({id:entry.id,label:entry.label,provider:entry.provider})),
     subscribe(fn) { if (closed) return () => {}; listeners.add(fn); return () => listeners.delete(fn); },
     register(id, provider, {label = id} = {}) {
       if (closed) throw Error('Home provider registry is disposed');

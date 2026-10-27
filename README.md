@@ -2,6 +2,8 @@
 
 **中文** · [English](#english)
 
+> **0.4.0 原版迁移候选，尚未发布。** 此分支已接入 Obsidian Home 0.9.2 的原版页面、设置、组件库和未改写的 CSS；0.3.0 的数据会先归档，再迁移到原版设置和 Markdown 笔记。真实 Harness 界面验收仍待测试浏览器释放。当前公开版本仍为 [0.3.0](https://github.com/joeseesun/qiaomu-home-dsh/releases/tag/v0.3.0)，以下示意图和旧版介绍对应该版本。进度与未完成项见 [迁移记录](docs/ORIGINAL-ADAPTATION.md)。
+
 每天打开 DeepSeek Harness，先看见该继续的事：找回会话、记下今日重点，然后开始工作。  
 *A calm home for DeepSeek Harness: find a conversation, choose today's priorities, and get going.*
 
