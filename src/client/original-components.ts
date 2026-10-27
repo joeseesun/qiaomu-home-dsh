@@ -24,3 +24,8 @@ export { completeTodo, reopenTodo, readTodos } from "../original/todo-data";
 export { writeFocus, readFocus } from "../original/daily-focus";
 export { builtinModules } from "../original/module-catalog";
 export { legacyMigrationPlan } from "./legacy-migration";
+export { createHomeRuntime } from "./home-runtime";
+export { createProviderRegistry } from "./providers.js";
+
+export { createNativeCards, questionSection } from "./native-cards";
+export { HomeSearchModal } from "./home-search";

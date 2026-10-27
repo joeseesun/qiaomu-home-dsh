@@ -1,119 +1,213 @@
-/**
- * 乔木 Home · 客户端半入口
- *
- * esbuild 的打包入口，产物被包成 DSH 的懒加载模块外壳后成为 `client.js`。
- * 做四件事：
- *   1. 注入页面样式；
- *   2. 注册中英字典；
- *   3. 把起点页注册到 `main`（key: qiaomu-home），把入口图标注册到 `sidebar.panellist`；
- *   4. 一切资源登记成 ctx.effect，插件卸载时干净回收。
- *
- * 只 require 平台种子表里的 react，不 import 任何 DSH 客户端包。
- */
-import React from 'react';
-
-import {createProviderRegistry} from './providers.js';
-import {PROVIDER_CSS} from './provider-css.js';
-import { HomePage } from './page.jsx';
-import { createHomeStore } from './store.js';
-import { CSS, CSS_EXTRA } from './styles.js';
-import { zh, en } from './locale.js';
-import { IconHome } from './icons.jsx';
-
-/** 面板 id：main 的 key 与 panellist 的 id 必须一致，侧栏点击才会选中本页。 */
-const PANEL_ID = 'qiaomu-home';
-const NS = 'qiaomuHome';
-
-/**
- * 需要的客户端服务。会话/工作区服务在 web 组合里始终存在，
- * 但仍在组件里做了判空降级，缺了也不至于白屏。
- */
-export const inject = ['slots', 'locale', 'sessions', 'workspaces', 'uiWorkspace'];
-
-/** 注入样式表（内容变化时更新，重复挂载只插一次）。 */
-function injectStyles() {
-  const tagId = 'qiaomu-home-dsh/page.css';
-  if (typeof document === 'undefined') return;
-  const content = CSS + CSS_EXTRA + PROVIDER_CSS;
-  const existing = document.querySelector(`style[data-plugin-css=${JSON.stringify(tagId)}]`);
-  if (existing !== null) {
-    if (existing.textContent !== content) existing.textContent = content;
-    return;
-  }
-  const tag = document.createElement('style');
-  tag.dataset.plugin = 'qiaomu-home-dsh';
-  tag.dataset.pluginCss = tagId;
-  tag.textContent = content;
-  document.head.appendChild(tag);
-}
-
-/** 侧栏面板图标：外壳负责按钮与选中态，这里只画图标。 */
-function PanelIcon({ size }) {
-  return React.createElement(IconHome, { size: size ?? 18 });
-}
-PanelIcon.displayName = 'QiaomuHomePanelIcon';
-
-/**
- * 客户端插件主体。
- * @param {object} ctx - 客户端根上下文。
- */
+import React, { useEffect, useRef, useState } from "react";
+import { createProviderRegistry } from "./providers.js";
+import { createHomeRuntime } from "./home-runtime";
+import { HOME_REMOTE, homeRemoteApi } from "./home-remote.js";
+import { watchHostTheme, applyHostTheme, setHostLanguage } from "./harness-ui";
+import { setLanguage, L } from "../original/i18n";
+import originalCss from "../original/styles.css";
+import hostCss from "./harness-ui.css";
+import boundaryCss from "./home-boundary.css";
+import { zh, en } from "./locale.js";
+import { IconHome } from "./icons.jsx";
+const PANEL_ID = "qiaomu-home",
+  NS = "qiaomuHome";
+export const inject = [
+  "slots",
+  "remote",
+  "locale",
+  "sessions",
+  "workspaces",
+  "uiWorkspace",
+  "sidebarRight",
+  "uiSession",
+  "layout",
+];
 export function apply(ctx) {
-  injectStyles();
-
-  ctx.effect(() => {
-    if (typeof ctx.locale?.register !== 'function') return () => {};
-    return ctx.locale.register(NS, { zh, en });
-  }, 'qiaomu-home: 字典');
-
-  const store = createHomeStore();
-  const providers=createProviderRegistry();
-  ctx.effect(()=>ctx.provide("qiaomuHome",providers));
-  ctx.effect(()=>()=>providers.dispose());
-
-  /** 传给页面的服务面：组件内全部判空调用。 */
-  const services = {
-    providers,
-    sessions: ctx.get?.('sessions') ?? ctx.sessions,
-    workspaces: ctx.get?.('workspaces') ?? ctx.workspaces,
-    uiWorkspace: ctx.get?.('uiWorkspace') ?? ctx.uiWorkspace,
+  const providers = createProviderRegistry(),
+    listeners = new Set(),
+    commandRegistrations = new Map();
+  let runtime = null,
+    error = "",
+    disposed = false,
+    generation = 0,
+    shortcuts = null;
+  const notify = () => {
+    for (const fn of listeners) fn();
   };
-
-  ctx.effect(
-    () =>
-      ctx.slots.inject('main', () =>
-        ctx.slots.register(
-          {
-            name: 'main',
-            key: PANEL_ID,
-            locale: NS,
-            inject: () => ({ store, services }),
-          },
-          HomePage,
-        ),
-      ),
-    'qiaomu-home: 起点页',
+  const locale = () => {
+    const language = ctx.locale.bind(NS)("language");
+    setHostLanguage(language === "zh" ? "zh" : "en");
+  };
+  ctx.effect(() =>
+    ctx.locale.register(NS, {
+      zh: { ...zh, language: "zh" },
+      en: { ...en, language: "en" },
+    }),
   );
-
-  ctx.effect(
-    () =>
-      ctx.slots.inject('sidebar.panellist', () =>
-        ctx.slots.register(
-          {
-            name: 'sidebar.panellist',
-            id: PANEL_ID,
-            order: -20,
-            locale: NS,
-            label: () => {
-              try {
-                return ctx.locale.bind(NS)('panel.title');
-              } catch {
-                return 'Home';
-              }
-            },
-          },
-          PanelIcon,
-        ),
+  locale();
+  ctx.effect(watchHostTheme);
+  ctx.effect(() => {
+    const style = document.createElement("style");
+    style.dataset.plugin = "qiaomu-home-dsh";
+    style.textContent = hostCss + originalCss + boundaryCss;
+    document.head.append(style);
+    return () => style.remove();
+  });
+  ctx.effect(() => ctx.provide("qiaomuHome", providers));
+  const installCommand = (entry) => {
+    if (!shortcuts) return;
+    entry.remove = shortcuts.register({
+      id: entry.id,
+      label: () => "Qiaomu Home · " + entry.name,
+      aliases: [entry.name],
+      defaults: {},
+      regions: ["page", "editable"],
+      modals: [],
+      resolve: () => {
+        const run = entry.resolve();
+        return run
+          ? { status: "handled", run }
+          : {
+              status: "blocked",
+              reason: L(
+                "此操作当前不可用",
+                "This action is currently unavailable",
+              ),
+            };
+      },
+    });
+  };
+  ctx.inject(["shortcuts"], (ready) => {
+    shortcuts = ready.shortcuts;
+    for (const entry of commandRegistrations.values()) installCommand(entry);
+    return () => {
+      for (const entry of commandRegistrations.values()) {
+        entry.remove?.();
+        entry.remove = null;
+      }
+      shortcuts = null;
+    };
+  });
+  const services = Object.fromEntries(
+    inject
+      .filter((key) => !["slots", "remote", "locale"].includes(key))
+      .map((key) => [key, ctx[key]]),
+  );
+  services.providers = providers;
+  services.registerCommand = (id, name, resolve) => {
+    const entry = { id, name, resolve, remove: null };
+    commandRegistrations.set(id, entry);
+    installCommand(entry);
+    return () => {
+      entry.remove?.();
+      commandRegistrations.delete(id);
+    };
+  };
+  ctx.effect(() => () => {
+    disposed = true;
+    generation++;
+    void runtime?.dispose();
+    runtime = null;
+    for (const entry of commandRegistrations.values()) entry.remove?.();
+    commandRegistrations.clear();
+    providers.dispose();
+    listeners.clear();
+  });
+  ctx.remote
+    .$mount(HOME_REMOTE)
+    .then(() => {
+      if (disposed) return;
+      ctx.inject(["remote.qiaomuHomeState"], (ready) => {
+        const epoch = ++generation;
+        const api = homeRemoteApi(ready.remote.qiaomuHomeState);
+        void createHomeRuntime(api, services)
+          .then(async (value) => {
+            if (disposed || epoch !== generation) {
+              await value.dispose();
+              return;
+            }
+            runtime = value;
+            error = "";
+            notify();
+            if (value.plugin.settings.openOnStartup)
+              services.layout.selectPanel(PANEL_ID);
+          })
+          .catch((failure) => {
+            if (!disposed && epoch === generation) {
+              error = failure.message;
+              notify();
+            }
+          });
+        return () => {
+          generation++;
+          void runtime?.dispose();
+          runtime = null;
+          notify();
+        };
+      });
+    })
+    .catch((failure) => {
+      if (!disposed) {
+        error = failure.message;
+        notify();
+      }
+    });
+  function Panel() {
+    const ref = useRef(null),
+      [, render] = useState(0),
+      language = ctx.locale.bind(NS)("language");
+    useEffect(() => {
+      const update = () => render((value) => value + 1);
+      listeners.add(update);
+      return () => listeners.delete(update);
+    }, []);
+    useEffect(() => {
+      locale();
+      if (!runtime) return;
+      setLanguage(runtime.plugin.settings.language);
+      runtime.plugin.eachView((view) => view.render());
+      applyHostTheme();
+    }, [language, runtime]);
+    useEffect(() => {
+      const active = runtime,
+        container = ref.current;
+      if (!active || !container) return;
+      void active
+        .attach(container)
+        .then(applyHostTheme)
+        .catch((failure) => {
+          error = failure.message;
+          notify();
+        });
+      return () => active.detach(container);
+    }, [runtime]);
+    return (
+      <div className="qaudio-dsh-surface qhome-dsh-host" ref={ref}>
+        {!runtime && (
+          <div className="qh-card-empty" role={error ? "alert" : "status"}>
+            {error || L("正在打开 Home…", "Opening Home…")}
+          </div>
+        )}
+      </div>
+    );
+  }
+  ctx.effect(() =>
+    ctx.slots.inject("main", () =>
+      ctx.slots.register({ name: "main", key: PANEL_ID, locale: NS }, Panel),
+    ),
+  );
+  ctx.effect(() =>
+    ctx.slots.inject("sidebar.panellist", () =>
+      ctx.slots.register(
+        {
+          name: "sidebar.panellist",
+          id: PANEL_ID,
+          order: -20,
+          locale: NS,
+          label: () => ctx.locale.bind(NS)("panel.title"),
+        },
+        ({ size }) => <IconHome size={size ?? 18} />,
       ),
-    'qiaomu-home: 侧栏入口',
+    ),
   );
 }

@@ -603,7 +603,12 @@ export const Platform = {
 export function setPlatform(value: any) {
   Platform.isMacOS = value.platform === "darwin";
 }
+let hostLanguage = "";
+export const setHostLanguage = (value: string) => {
+  hostLanguage = value;
+};
 export const getLanguage = () =>
+  hostLanguage ||
   globalThis.document?.documentElement.lang ||
   globalThis.navigator?.language ||
   "zh";

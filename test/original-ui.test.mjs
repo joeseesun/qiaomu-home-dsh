@@ -145,7 +145,7 @@ test("original CSS is byte-identical to the frozen 0.9.2 source", async () => {
     source.files["styles.css"],
   );
 });
-test("vendored sources match the recorded upstream files except the explicit native Node boundary", async () => {
+test("vendored sources reconcile exactly to upstream after reversing documented host patches", async () => {
   const source = JSON.parse(
     await readFile("vendor/qiaomu-home/source.json", "utf8"),
   );
@@ -164,6 +164,30 @@ test("vendored sources match the recorded upstream files except the explicit nat
             "node.instanceOf(HTMLElement)",
           ),
       );
+    if (file === "src/main.ts")
+      bytes = Buffer.from(
+        bytes
+          .toString()
+          .replace(
+            "import { UPDATE_ENTRIES } from '../client/home-release';",
+            "import { UPDATE_ENTRIES } from './update-notes-release';",
+          )
+          .replace(
+            "    // Harness owns its pane dividers; Home styles only its own surfaces.",
+            "    watchPaneDividers(this);",
+          ),
+      );
+    const patches = JSON.parse(
+      await readFile("vendor/qiaomu-home/patches.json", "utf8"),
+    );
+    for (const [original, adapted] of (patches[file] || []).slice().reverse()) {
+      assert.equal(
+        bytes.toString().split(adapted).length,
+        2,
+        `Exact host patch: ${file}`,
+      );
+      bytes = Buffer.from(bytes.toString().replace(adapted, original));
+    }
     assert.equal(
       createHash("sha256").update(bytes).digest("hex"),
       expected,
@@ -577,4 +601,270 @@ test("legacy habit names incompatible with YAML/card syntax get distinct readabl
   );
   assert(daily);
   for (const name of names) assert(daily.text.includes(name + ": 1"));
+});
+test("the original Plugin lifecycle mounts on real Host state, opens original settings and survives panel detach", async () => {
+  const { HomeHost } = await import("../src/host/home-host.js");
+  const dir = await mkdtemp(path.join(tmpdir(), "qhome-runtime-"));
+  const host = new HomeHost(dir, {
+    credentials: { get: async () => "", set: async () => {} },
+  });
+  let runtime;
+  const providers = ui.createProviderRegistry();
+  const observable = (value) => ({
+    getSnapshot: () => value,
+    subscribe: () => () => {},
+  });
+  const sessionList = observable({ phase: "ready", ids: [], byId: {} }),
+    workspaceList = observable({
+      phase: "ready",
+      items: [],
+      archivedSessionIds: [],
+    });
+  const calls = [];
+  const services = {
+    providers,
+    sessions: {
+      list: sessionList,
+      search: async () => ({ ok: true, value: { items: [] } }),
+    },
+    workspaces: { list: workspaceList },
+    uiWorkspace: {},
+    layout: { selectPanel: (id) => calls.push(id) },
+  };
+  const api = {
+    load: () => host.load(),
+    save: (value) => host.save(value),
+    workspace: (value) => host.workspace.operate(value),
+    network: async () => ({
+      status: 200,
+      headers: {},
+      text: "",
+      json: { version: 1, extensions: [] },
+      base64: "",
+    }),
+    secret: (value) => host.secret(value),
+    daily: (value) => host.daily(value),
+    migrateLegacy: (value) => host.migrateLegacy(value),
+  };
+  const container = document.createElement("div");
+  document.body.append(container);
+  try {
+    const settings = ui.normalizeSettings(null);
+    settings.wallpaper.source = "none";
+    settings.openOnStartup = false;
+    await host.save({ revision: 0, data: settings });
+    await host.workspace.write({
+      path: "Config/plugins/qiaomu-home/update-notes.json",
+      text: JSON.stringify({ seenVersion: "0.4.0", autoShow: false }),
+    });
+    runtime = await ui.createHomeRuntime(api, services, {
+      storage: { getItem: () => null },
+    });
+    await runtime.attach(container);
+    await tick();
+    assert(container.querySelector(".qh-head"));
+    assert.equal(runtime.plugin.manifest.id, "qiaomu-home");
+    assert(runtime.app.commands.commands["qiaomu-home:focus-search"]);
+    assert(runtime.app.commands.commands["daily-notes"]);
+    runtime.openSettings();
+    assert(document.querySelector(".qh-settings"));
+    document.querySelector(".modal-close-button").click();
+    const view = runtime.app.workspace.getLeavesOfType("qiaomu-home")[0].view;
+    runtime.detach(container);
+    assert(!container.children.length);
+    await runtime.attach(container);
+    assert.equal(
+      runtime.app.workspace.getLeavesOfType("qiaomu-home")[0].view,
+      view,
+    );
+    runtime.plugin.settings.customHeadline = "Persisted original settings";
+    await runtime.plugin.saveSettings();
+    assert.equal(
+      (await host.load()).data.customHeadline,
+      "Persisted original settings",
+    );
+    await runtime.dispose();
+    assert(!container.children.length);
+    assert.equal(HTMLElement.prototype.createDiv, undefined);
+  } finally {
+    await runtime?.dispose();
+    providers.dispose();
+    host.dispose();
+    container.remove();
+    await host.workspace.ready;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("native legacy cards reuse original components, persist journal and preserve conflicting drafts across reload", async () => {
+  const { HomeWorkspace } = await import("../src/host/workspace.js");
+  const { writeFile } = await import("node:fs/promises");
+  const directory = await mkdtemp(path.join(tmpdir(), "qhome-cards-"));
+  const workspace = new HomeWorkspace(directory);
+  const vault = new ui.HomeVault((request) => workspace.operate(request));
+  await vault.sync();
+  await vault.create("Home/Scratchpad.md", "Original scratchpad");
+  await vault.create(
+    "Home/Daily questions.md",
+    "## 2020-01-01\n\nEarlier question\n\nPreserve this answer\n",
+  );
+  const fixture = setup(),
+    plugin = fixture.plugin;
+  plugin.app.vault = vault;
+  const saved = new Map();
+  const storage = {
+    getItem: (key) => saved.get(key) || null,
+    setItem: (key, value) => saved.set(key, value),
+    removeItem: (key) => saved.delete(key),
+  };
+  const state = { getSnapshot: () => ({ compatibility: null }) };
+  const native = {
+    sessions: () => [
+      { id: "conversation-1", createdAt: Date.now(), updatedAt: Date.now() },
+    ],
+  };
+  const page = plugin.settings.pages[0];
+  for (const id of [
+    "dsh-scratchpad",
+    "dsh-daily-question",
+    "dsh-session-activity",
+  ])
+    page.moduleOptions[id] = { visible: true, limit: 6 };
+  let cards = ui.createNativeCards(plugin, native, state, storage);
+  const parent = ui.createEl("div");
+  document.body.append(parent);
+  const mount = () => {
+    parent.empty();
+    cards.render(parent, page.id, (id, title) => {
+      const card = parent.createDiv({ cls: "qh-card" });
+      card.dataset.module = id;
+      card.createDiv({ cls: "qh-card-title", text: title });
+      return card;
+    });
+  };
+  const field = (id) => parent.querySelector(`[data-module="${id}"] textarea`);
+  const save = (id) =>
+    [...parent.querySelectorAll(`[data-module="${id}"] button`)]
+      .find((button) => button.textContent === "保存")
+      .click();
+  const input = (id, value) => {
+    field(id).value = value;
+    field(id).dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  try {
+    ui.setLanguage("zh");
+    mount();
+    await tick();
+    assert.equal(field("dsh-scratchpad").value, "Original scratchpad");
+    assert.equal(parent.querySelectorAll(".qh-heatmap").length, 1);
+    assert.match(
+      parent.querySelector('[data-module="dsh-session-activity"]').textContent,
+      /今天新建对话/,
+    );
+    assert.match(
+      parent.querySelector(".qh-heatmap").getAttribute("aria-label"),
+      /1 个对话/,
+    );
+    input("dsh-scratchpad", "Saved scratchpad");
+    save("dsh-scratchpad");
+    await tick();
+    assert.equal(
+      (await workspace.read("Home/Scratchpad.md")).text,
+      "Saved scratchpad",
+    );
+    input("dsh-daily-question", "Today’s answer\nWith another line");
+    save("dsh-daily-question");
+    await tick();
+    const journal = (await workspace.read("Home/Daily questions.md")).text;
+    assert.match(journal, /Preserve this answer/);
+    assert.match(journal, /Today’s answer\nWith another line/);
+    input("dsh-scratchpad", "Unsaved draft preserved");
+    await writeFile(
+      path.join(directory, "Home/Scratchpad.md"),
+      "External edit wins",
+    );
+    save("dsh-scratchpad");
+    await tick();
+    assert.equal(
+      (await workspace.read("Home/Scratchpad.md")).text,
+      "External edit wins",
+    );
+    assert.match(
+      parent.querySelector('[data-module="dsh-scratchpad"]').textContent,
+      /草稿已保留/,
+    );
+    assert(
+      [...saved.values()].some((value) =>
+        value.includes("Unsaved draft preserved"),
+      ),
+    );
+    await cards.dispose();
+    cards = ui.createNativeCards(plugin, native, state, storage);
+    mount();
+    await tick();
+    assert.equal(field("dsh-scratchpad").value, "Unsaved draft preserved");
+    save("dsh-scratchpad");
+    await tick();
+    const copyButton = [
+      ...parent.querySelectorAll('[data-module="dsh-scratchpad"] button'),
+    ].find((button) => button.textContent === "另存副本");
+    assert.equal(copyButton.hidden, false);
+    copyButton.click();
+    await tick();
+    const copy = (await workspace.snapshot()).entries.find((entry) =>
+      entry.path.startsWith("Home/Scratchpad-draft-"),
+    );
+    assert(copy);
+    assert.equal(
+      (await workspace.read(copy.path)).text,
+      "Unsaved draft preserved",
+    );
+    assert.equal(
+      (await workspace.read("Home/Scratchpad.md")).text,
+      "External edit wins",
+    );
+  } finally {
+    await cards.dispose();
+    parent.remove();
+    vault.dispose();
+    await fixture.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Home workspace search applies quoted paths, tags, exclusions and OR without executing regex", async () => {
+  const { HomeWorkspace } = await import("../src/host/workspace.js");
+  const directory = await mkdtemp(path.join(tmpdir(), "qhome-search-"));
+  const workspace = new HomeWorkspace(directory),
+    vault = new ui.HomeVault((request) => workspace.operate(request));
+  await vault.sync();
+  await vault.create("Project A/One.md", "---\ntags: [todo]\n---\nUseful text");
+  await vault.create("Project B/Two.md", "#todo\nExcluded text");
+  await vault.create("Elsewhere.md", "Needle");
+  const app = { vault, metadataCache: vault.metadataCache };
+  const modal = new ui.HomeSearchModal(app, async () => {});
+  try {
+    modal.open();
+    await tick();
+    assert.deepEqual(
+      (
+        await modal.getSuggestions(
+          'path:"Project A" tag:todo -content:excluded',
+        )
+      ).map((file) => file.path),
+      ["Project A/One.md"],
+    );
+    const found = (await modal.getSuggestions("file:One OR content:Needle"))
+      .map((file) => file.path)
+      .sort();
+    assert.deepEqual(found, ["Elsewhere.md", "Project A/One.md"]);
+    await assert.rejects(
+      modal.getSuggestions("/unbounded.*/"),
+      /支持文字|Supported/,
+    );
+  } finally {
+    modal.close();
+    vault.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

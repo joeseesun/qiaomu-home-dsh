@@ -228,6 +228,18 @@ export class HomeVault extends Events {
   create(path: string, text: string) {
     return this.serialize(path, () => this.save(path, text, null));
   }
+  /** A displayed draft may only replace the exact note it was based on. */
+  replaceSnapshot(path: string, before: string | null, text: string) {
+    return this.serialize(path, async () => {
+      const exists = await this.adapter.exists(path);
+      const current = exists ? await this.readPath(path) : null;
+      if ((current?.text ?? null) !== before)
+        throw Error(
+          "笔记已在其他位置修改。草稿已保留，请先打开笔记核对。 / Note changed elsewhere. Your draft is retained; open the note to compare.",
+        );
+      return this.save(path, text, current?.etag ?? null);
+    });
+  }
   createBinary(path: string, bytes: ArrayBuffer) {
     return this.serialize(path, () => this.save(path, bytes, null));
   }

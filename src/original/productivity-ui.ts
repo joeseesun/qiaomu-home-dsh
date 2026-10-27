@@ -58,7 +58,7 @@ function openNotePaths(plugin: QiaomuHomePlugin): string[] {
   });
 }
 export function openSavedSearch(plugin: QiaomuHomePlugin, query: string): void {
-  window.open(`obsidian://search?vault=${encodeURIComponent(plugin.app.vault.getName())}&query=${encodeURIComponent(query)}`);
+  plugin.app.home.search(query);
 }
 export function renderProductivity(parent: HTMLElement, plugin: QiaomuHomePlugin, id: ProductivityId, pageId: string, configure: () => void): void {
   const config = PRODUCTIVITY_MODULES[id], options = moduleOptions(plugin.settings, id, pageId), app = plugin.app;

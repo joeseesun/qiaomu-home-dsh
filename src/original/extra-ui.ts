@@ -468,8 +468,8 @@ export function renderExtra(parent: HTMLElement, plugin: QiaomuHomePlugin, id: E
     const streak = activityStreak(year);
     const tiles = body.createDiv({ cls: "qh-stat-tiles" });
     const tile = (value: string, label: string) => { const el = tiles.createDiv({ cls: "qh-stat-tile" }); el.createDiv({ cls: "qh-stat-value", text: value }); el.createDiv({ cls: "qh-stat-label", text: label }); };
-    tile(String(created), L("今天新建", "created today"));
-    tile(String(edited), L("今天编辑", "edited today"));
+    tile(String(created), app.home?.sessionActivity ? L("今天新建对话", "created today") : L("今天新建", "created today"));
+    tile(String(edited), app.home?.sessionActivity ? L("今天更新对话", "updated today") : L("今天编辑", "edited today"));
     tile(String(streak), L("连续记录天", "day streak"));
     const heat = body.createDiv({ cls: "qh-heat" });
     const dailyPaths = new Map<string, string>();
@@ -507,12 +507,12 @@ export function renderExtra(parent: HTMLElement, plugin: QiaomuHomePlugin, id: E
       const grid = frame.createDiv({ cls: "qh-heatmap" });
       grid.style.gridTemplateColumns = `repeat(${columns}, 12px)`;
       grid.setAttr("role", "img");
-      grid.setAttr("aria-label", L("最近 {columns} 周有 {active} 天在写，最多一天 {max} 篇", "{active} active days in {columns} weeks, up to {max} notes a day", { active, columns, max }));
+      grid.setAttr("aria-label", app.home?.sessionActivity ? L("最近 {columns} 周有 {active} 天活跃，最多一天 {max} 个对话", "{active} active days in {columns} weeks, up to {max} conversations a day", { active, columns, max }) : L("最近 {columns} 周有 {active} 天在写，最多一天 {max} 篇", "{active} active days in {columns} weeks, up to {max} notes a day", { active, columns, max }));
       for (const day of shown) {
         const level = heatLevel(day.count, max);
         const path = dailyPaths.get(day.day);
         const cell = grid.createDiv({ cls: `qh-heat-cell qh-heat-${level}${day.day === todayKey ? " is-today" : ""}${path ? " has-note" : ""}` });
-        setTooltip(cell, `${shortDate(day.day)} · ${day.count ? L("{count} 篇", "{count} notes", { count: day.count }) : L("没有记录", "No activity")}${path ? L(" · 点击打开日记", " · click to open") : ""}`, { delay: 150 });
+        setTooltip(cell, `${shortDate(day.day)} · ${day.count ? (app.home?.sessionActivity ? L("{count} 个对话", "{count} conversations", { count: day.count }) : L("{count} 篇", "{count} notes", { count: day.count })) : L("没有记录", "No activity")}${path ? L(" · 点击打开日记", " · click to open") : ""}`, { delay: 150 });
         if (path) cell.addEventListener("click", () => { const file = app.vault.getAbstractFileByPath(path); if (file instanceof TFile) open(file); });
       }
       const foot = heat.createDiv({ cls: "qh-heat-foot" });

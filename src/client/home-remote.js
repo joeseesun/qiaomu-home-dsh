@@ -102,6 +102,20 @@ export function createHomeClientState(api) {
         publish();
       });
     },
+    saveNative(patch) {
+      const saved = structuredClone(patch);
+      return serialize(async () => {
+        if (!value?.data) throw Error("Home is loading");
+        const next = { ...value.native, ...saved };
+        const result = await api.save({
+          revision: value.revision,
+          data: value.data,
+          native: next,
+        });
+        value = { ...value, revision: result.revision, native: next };
+        publish();
+      });
+    },
     secret(id, key) {
       return serialize(async () => {
         const result = await api.secret({ id, value: key });

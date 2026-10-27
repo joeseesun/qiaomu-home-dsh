@@ -7,7 +7,7 @@ Target: complete the original Home workflows and use their existing UI in DeepSe
 - Frozen upstream: Qiaomu Home 0.9.2, `38d5dc570032a571ec564cae8a7ccda393e8a706`.
 - `src/original` contains the upstream source, language resources, data and unchanged stylesheet. `vendor/qiaomu-home/source.json` records every original SHA-256; GPL-3.0 license is included.
 - Original DOM helpers resolve to `src/client/original-ui.ts` and `harness-ui.ts` during the adapter build. No `window`, `Node.prototype` or `HTMLElement.prototype` extensions.
-- The only source edit at this checkpoint is `Node.instanceOf(HTMLElement)` → native `instanceof` in the wallpaper glass observer. The original canvas glass, dimensions, module layout and CSS remain intact.
+- Source edits are limited to the native DOM boundary, DSH release notes, disabling Obsidian pane-divider ownership, native card registration/rendering, Harness search and session-activity labels. `vendor/qiaomu-home/patches.json` records additional exact replacements; automated tests reverse every patch and compare all upstream hashes. The original canvas glass, dimensions, module layout and CSS remain intact.
 - Host storage/credential primitives derive from Qiaomu Audio DSH 0.1.3 (`528efc073911fbdecfb4b126eb161661542ee448`) with independent Home credential namespace and directory.
 
 ## Verified in automated tests
@@ -21,12 +21,10 @@ Target: complete the original Home workflows and use their existing UI in DeepSe
 
 ## Required before release
 
-1. Wire the Home Host remote service and original HomeView into the actual Harness panel; currently this branch tests those adapters independently and the production entry still uses 0.3.0's React page.
-2. Migrate existing `dsh-qiaomu-home:v1` state without losing todos, quick notes, scratchpad, habits/history, shortcut groups, pages, focus timer, provider card placement or session navigation. Preserve the raw legacy state and make migration restart-safe.
-3. Map native sessions, note preview/editing, search, commands, provider lifecycle and startup behavior. Reconcile Obsidian-only integrations explicitly against available Harness capabilities.
-4. Finish scoped local-wallpaper cache, daily-note settings UI and keychain references in the runtime mount. Verify network fixtures and live weather/gallery requests separately.
-5. Run original module workflows and visual comparison in the real Harness. Browser is user-controlled; no browser operation/restart is authorized during this pause.
-6. Publish a release only after applicable checks; download/hash-check the public package, install with backup, and separately verify the installed version. Do not restart the daily Harness while the other chat awaits approval.
+1. Complete the remaining legacy preference mappings (multi-search group selections/custom templates, wallpaper/quote offsets), and review original-only integrations and new-tab behavior against public Harness APIs.
+2. Exercise real Harness navigation, commands, scoped local wallpapers, provider lifecycle, keychain pickers, daily-note settings, and live weather/gallery requests.
+3. Visually compare original module workflows, including responsive settings, dialogs, menus, typography and dark theme. The browser is user-controlled; no browser operation or restart is authorized during this pause.
+4. Publish only after applicable checks; download/hash-check the public package, install with backup, and separately verify the installed version. Do not restart the daily Harness while another chat awaits approval.
 
 ## Legacy-data and native-API checkpoint
 
@@ -34,4 +32,12 @@ The legacy migration planner now converts all valid 0.3.0 state into original se
 
 Host remote service and matching client descriptors are implemented in `src/host/service.js` / `src/client/home-remote.js`. The client serializes all revision-changing settings, credential-reference and daily-configuration writes. Native navigation uses the local Harness public SDK: `workspaces.create`, `sessions.create`, `uiWorkspace.openSession`, `sidebarRight.openResource`, `uiSession.bindingSource`, and the real `__DSH_DIRECTORY_PICKER__.pick` contract. Note navigation creates/reuses a Home-scoped workspace/session, never submits an AI message, and questions preserve any pre-existing input. These are contract tests against fixture services, not real browser validation.
 
-These pieces are not yet connected to the production entry. Remaining runtime work includes original Plugin lifecycle, native file/workspace/search/command adapters, legacy DSH-specific editable cards and activity data, provider-registry wiring, settings token mapping and actual page mount. No new release or installed runtime is claimed.
+## Production entry checkpoint — 0.4.0 candidate
+
+The production build now bundles the actual original Plugin/HomeView/settings/module-library lifecycle, unchanged original CSS and the Home Host RemoteService. The old React page remains only as legacy source/tests and is no longer imported by the production entry. Host CSS supplies only missing host tokens, primitives and panel dimensions. Original view instances survive panel detach/reattach; original focus and ambient lifecycles are retained and cleaned up on unload.
+
+The Home provider registry feeds the original plugin-source discovery and adds native Harness conversation search/recent/actions. Public sidebar tab metadata supplies the working-set card. Original saved-search actions now open a scoped Home note search with text, quoted path/file, tags, content, exclusions and OR. Note navigation continues even if saving recent-file history encounters a settings conflict.
+
+Legacy scratchpad and daily-question cards use the original native-card factory, input classes and actions. Markdown writes compare the displayed base text plus the Host content hash. Drafts survive card refresh, navigation and reload; external edits are preserved, and conflicts can be saved as a separate Markdown copy. The conversation activity card uses the actual original heatmap renderer with session creation/update times and accurate conversation labels. It is a snapshot of these timestamps, not an invented message-by-message history.
+
+Automated verification includes the built client factory and slot/CSS cleanup, original full Plugin mounting on real temporary Host state, draft conflict/reload/copy, journal history preservation and local search syntax. This is Node/jsdom and real temporary filesystem evidence. No new real Harness runtime, release or installed 0.4.0 is claimed.

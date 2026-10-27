@@ -1,3 +1,4 @@
+import { nativeModules } from "../client/native-cards";
 import { PRODUCTIVITY_MODULES } from "./productivity-catalog";
 import type { App } from "obsidian";
 import type { RegistryEntry } from "./registry";
@@ -29,6 +30,7 @@ export interface HomeModule {
 
 export function builtinModules(): HomeModule[] {
   return [
+    ...nativeModules(),
     ...Object.entries(PRODUCTIVITY_MODULES).map(([id, item]): HomeModule => ({ id, title: L(item.zh, item.en), source: "Home", icon: item.icon, status: "ready", description: L(item.description, item.descriptionEn) })),
     ...Object.entries(EXTRA_MODULES).map(([id, item]): HomeModule => ({ id, title: L(item.zh, item.en), source: "Home", icon: item.icon, status: "ready", description: L(item.description, item.descriptionEn) })),
     ...Object.entries(INTEGRATIONS).map(([id, item]): HomeModule => ({ id, title: L(item.zh, item.en), source: item.pluginName, icon: item.icon, status: "ready",

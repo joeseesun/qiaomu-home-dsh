@@ -4,6 +4,8 @@ export function nativeHomeBridge(
   {
     directoryPicker = () => globalThis.__DSH_DIRECTORY_PICKER__,
     timeout = 5000,
+    translate = (zh, en) =>
+      globalThis.navigator?.language?.startsWith("zh") ? zh : en,
   } = {},
 ) {
   let closed = false,
@@ -88,13 +90,14 @@ export function nativeHomeBridge(
       return [
         {
           id: "recent",
-          title: "最近对话 / Recent conversations",
+          title: translate("最近对话", "Recent conversations"),
           icon: "messages-square",
           items: sessions()
             .slice(0, 6)
             .map((row) => ({
               id: row.id,
-              title: row.title?.trim() || "新对话 / New conversation",
+              title:
+                row.title?.trim() || translate("新对话", "New conversation"),
               subtitle: row.workspaceTitle || "",
               icon: "message-square",
               open: () => {
@@ -102,7 +105,7 @@ export function nativeHomeBridge(
                 services.uiWorkspace.openSession(row.id);
               },
             })),
-          empty: "还没有对话 / No conversations yet",
+          empty: translate("还没有对话", "No conversations yet"),
         },
       ];
     },
@@ -110,7 +113,7 @@ export function nativeHomeBridge(
       return [
         {
           id: "new-session",
-          label: "新对话 / New conversation",
+          label: translate("新对话", "New conversation"),
           icon: "message-square-plus",
           run: () => {
             requireReady();
@@ -119,7 +122,7 @@ export function nativeHomeBridge(
         },
         {
           id: "open-workspace",
-          label: "打开工作区 / Open workspace",
+          label: translate("打开工作区", "Open workspace"),
           icon: "folder-open",
           run: async () => {
             requireReady();
@@ -155,7 +158,41 @@ export function nativeHomeBridge(
       }));
     },
   };
+  const openFiles = () => {
+    const currentWorkspace = workspaces().find((item) =>
+      samePath(item.path, root),
+    );
+    const sessionIds = new Set(currentWorkspace?.sessionIds || []),
+      paths = new Set();
+    for (const tab of services.sidebarRight?.openTabs?.getSnapshot() || []) {
+      if (
+        typeof tab.contentId !== "string" ||
+        !tab.contentId.startsWith("dsh-resource://file/session/")
+      )
+        continue;
+      try {
+        const [session, ...parts] = tab.contentId
+          .slice("dsh-resource://file/session/".length)
+          .split("/");
+        if (!sessionIds.has(decodeURIComponent(session))) continue;
+        let path = parts.map(decodeURIComponent).join("/");
+        const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+        if (path.startsWith(normalizedRoot + "/"))
+          path = path.slice(normalizedRoot.length + 1);
+        if (
+          !path ||
+          path.startsWith("/") ||
+          /^[A-Za-z]:/.test(path) ||
+          path.split("/").some((part) => part === ".." || part.startsWith("."))
+        )
+          continue;
+        paths.add(path);
+      } catch {}
+    }
+    return [...paths];
+  };
   return {
+    openFiles,
     provider,
     workspaces,
     sessions,
@@ -166,6 +203,7 @@ export function nativeHomeBridge(
       const unsubs = [
         services.sessions?.list.subscribe(fn),
         services.workspaces?.list.subscribe(fn),
+        services.sidebarRight?.openTabs?.subscribe(fn),
       ].filter(Boolean);
       return () => unsubs.forEach((unsubscribe) => unsubscribe());
     },

@@ -186,3 +186,46 @@ test("native providers preserve search/recent actions and use the actual directo
   }
   assert.throws(() => bridge.provider.actions()[0].run(), /closed/);
 });
+test("working-set inventory reads the public openTabs metadata and excludes unrelated workspaces", async () => {
+  const f = fixture();
+  f.workspaces.set({
+    phase: "ready",
+    items: [
+      {
+        workspaceId: "home",
+        path: "/tmp/home-notes",
+        sessionIds: ["home-session"],
+      },
+    ],
+    archivedSessionIds: [],
+  });
+  f.services.sidebarRight.openTabs = store([
+    {
+      sessionId: "home-session",
+      kind: "document-preview",
+      contentId: "dsh-resource://file/session/home-session/Note.md",
+    },
+    {
+      sessionId: "home-session",
+      contentId:
+        "dsh-resource://file/session/home-session//tmp/home-notes/Daily/Today.md",
+    },
+    {
+      sessionId: "other",
+      contentId: "dsh-resource://file/session/other/private.md",
+    },
+    {
+      sessionId: "home-session",
+      contentId: "dsh-resource://file/session/home-session/../private.md",
+    },
+  ]);
+  const bridge = nativeHomeBridge(f.services);
+  try {
+    bridge.setRoot("/tmp/home-notes");
+    assert.deepEqual(bridge.openFiles(), ["Note.md", "Daily/Today.md"]);
+    f.services.sidebarRight.openTabs.set([]);
+    assert.deepEqual(bridge.openFiles(), []);
+  } finally {
+    bridge.dispose();
+  }
+});

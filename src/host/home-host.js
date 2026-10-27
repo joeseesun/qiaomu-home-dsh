@@ -41,6 +41,7 @@ export class HomeHost {
       legacyPending: state.data.legacyPending || null,
       compatibility: state.data.compatibility || null,
       credentialIds: state.data.credentialIds || [],
+      native: state.data.native || { recentFiles: [] },
       daily: state.data.daily || {
         folder: "Daily",
         format: "YYYY-MM-DD",
@@ -60,9 +61,24 @@ export class HomeHost {
         Array.isArray(request.data)
       )
         throw Error("Invalid Home settings");
+      if (request.native !== undefined) {
+        if (
+          !request.native ||
+          !Array.isArray(request.native.recentFiles) ||
+          request.native.recentFiles.length > 200 ||
+          Object.keys(request.native).some((key) => key !== "recentFiles")
+        )
+          throw Error("Invalid Home navigation state");
+        for (const name of request.native.recentFiles)
+          await this.workspace.resolve(name);
+      }
       const next = await this.store.save({
         revision: current.revision,
-        data: { ...current.data, settings: request.data },
+        data: {
+          ...current.data,
+          settings: request.data,
+          ...(request.native !== undefined ? { native: request.native } : {}),
+        },
       });
       return { revision: next.revision };
     });

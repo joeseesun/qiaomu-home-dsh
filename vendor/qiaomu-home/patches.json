@@ -1,0 +1,42 @@
+{
+  "src/view.ts": [
+    [
+      "      this.renderRecommendations(next);",
+      "      this.plugin.app.home?.renderNativeModules?.(next, page.id, (id, title, icon) => this.nativeCard(next, id, title, icon));\n      this.renderRecommendations(next);"
+    ]
+  ],
+  "src/module-catalog.ts": [
+    [
+      "export function builtinModules(): HomeModule[] {\n  return [",
+      "export function builtinModules(): HomeModule[] {\n  return [\n    ...nativeModules(),"
+    ],
+    [
+      "import { PRODUCTIVITY_MODULES }",
+      "import { nativeModules } from \"../client/native-cards\";\nimport { PRODUCTIVITY_MODULES }"
+    ]
+  ],
+  "src/productivity-ui.ts": [
+    [
+      "  window.open(`obsidian://search?vault=${encodeURIComponent(plugin.app.vault.getName())}&query=${encodeURIComponent(query)}`);",
+      "  plugin.app.home.search(query);"
+    ]
+  ],
+  "src/extra-ui.ts": [
+    [
+      "L(\"今天新建\", \"created today\")",
+      "app.home?.sessionActivity ? L(\"今天新建对话\", \"created today\") : L(\"今天新建\", \"created today\")"
+    ],
+    [
+      "L(\"今天编辑\", \"edited today\")",
+      "app.home?.sessionActivity ? L(\"今天更新对话\", \"updated today\") : L(\"今天编辑\", \"edited today\")"
+    ],
+    [
+      "L(\"最近 {columns} 周有 {active} 天在写，最多一天 {max} 篇\", \"{active} active days in {columns} weeks, up to {max} notes a day\", { active, columns, max })",
+      "app.home?.sessionActivity ? L(\"最近 {columns} 周有 {active} 天活跃，最多一天 {max} 个对话\", \"{active} active days in {columns} weeks, up to {max} conversations a day\", { active, columns, max }) : L(\"最近 {columns} 周有 {active} 天在写，最多一天 {max} 篇\", \"{active} active days in {columns} weeks, up to {max} notes a day\", { active, columns, max })"
+    ],
+    [
+      "L(\"{count} 篇\", \"{count} notes\", { count: day.count })",
+      "(app.home?.sessionActivity ? L(\"{count} 个对话\", \"{count} conversations\", { count: day.count }) : L(\"{count} 篇\", \"{count} notes\", { count: day.count }))"
+    ]
+  ]
+}

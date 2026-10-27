@@ -1,5 +1,5 @@
 import { UpdateNotes } from './update-notes';
-import { UPDATE_ENTRIES } from './update-notes-release';
+import { UPDATE_ENTRIES } from '../client/home-release';
 import { currentLanguage as updateLocale } from './i18n';
 import { watchPaneDividers } from "./pane-dividers";
 import { HomeTaskIndex } from "./task-index";
@@ -48,7 +48,7 @@ export default class QiaomuHomePlugin extends Plugin {
   private claiming = new WeakSet<WorkspaceLeaf>();
 
   async onload(): Promise<void> {
-    watchPaneDividers(this);
+    // Harness owns its pane dividers; Home styles only its own surfaces.
     const data: unknown = await this.loadData();
     // The language decides default page and shortcut names, so it is set before settings are normalized.
     setLanguage((data as { language?: LanguagePreference } | null)?.language ?? "auto");

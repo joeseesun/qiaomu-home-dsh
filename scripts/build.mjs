@@ -6,24 +6,29 @@
  *
  * 产物外壳必须是 `window.__ModuleLoader__.load({ id, factory(require) })`：
  * DSH 的模块系统以「工厂返回 exports」的惰性 CJS 协议加载插件，不能是 ESM。
- * 宿主半 index.js 是手写的，不需要构建。
+ * 宿主半构建独立 RemoteService，保存文件与凭据。
  *
  * 用法：node scripts/build.mjs [--dev]
  */
-import { build } from 'esbuild';
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { build } from "esbuild";
+import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, '..');
-const CLIENT_ID = 'qiaomu-home-dsh';
-const STAGE = path.join(ROOT, 'build');
+const ROOT = path.resolve(HERE, "..");
+const CLIENT_ID = "qiaomu-home-dsh";
+const STAGE = path.join(ROOT, "build");
 
-const dev = process.argv.includes('--dev');
+const dev = process.argv.includes("--dev");
 
 /** 客户端半的 external：只有平台种子表里的模块可以外部化，其余必须内联。 */
-const CLIENT_EXTERNAL = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client'];
+const CLIENT_EXTERNAL = [
+  "react",
+  "react/jsx-runtime",
+  "react-dom",
+  "react-dom/client",
+];
 
 /** 把 esbuild 的 CJS 产物包进 DSH 的懒加载工厂外壳。 */
 function moduleLoaderShell(body) {
@@ -44,54 +49,85 @@ ${body}
 
 async function buildClient() {
   await mkdir(STAGE, { recursive: true });
-  const entry = path.join(STAGE, 'client-entry.js');
-  const raw = path.join(STAGE, 'client.raw.cjs');
+  const entry = path.join(STAGE, "client-entry.js");
+  const raw = path.join(STAGE, "client.raw.cjs");
   await writeFile(
     entry,
     [
-      '/* 客户端半的 esbuild 入口：重新导出 src/client/index.jsx 的公开接口。 */',
+      "/* 客户端半的 esbuild 入口：重新导出 src/client/index.jsx 的公开接口。 */",
       "export * from '../src/client/index.jsx';",
-      '',
-    ].join('\n'),
-    'utf8',
+      "",
+    ].join("\n"),
+    "utf8",
   );
   await build({
     entryPoints: [entry],
     outfile: raw,
     bundle: true,
-    format: 'cjs',
-    platform: 'browser',
-    target: ['chrome120'],
+    format: "cjs",
+    platform: "browser",
+    target: ["chrome120"],
     external: CLIENT_EXTERNAL,
-    legalComments: 'none',
-    logLevel: 'warning',
-    loader: { '.css': 'text' },
-    jsx: 'automatic',
+    alias: { obsidian: path.join(ROOT, "src/client/original-ui.ts") },
+    inject: [path.join(ROOT, "src/client/original-globals.ts")],
+    legalComments: "eof",
+    logLevel: "warning",
+    loader: { ".css": "text" },
+    jsx: "automatic",
     sourcemap: dev,
   });
   // 剥掉可能存在的 sourceMappingURL：外壳里的注释行会失效，留着只会让浏览器 404。
-  const body = (await readFile(raw, 'utf8')).replace(/^\/\/# sourceMappingURL=.*$/gm, '');
-  await writeFile(path.join(ROOT, 'client.js'), moduleLoaderShell(body), 'utf8');
+  const body = (await readFile(raw, "utf8")).replace(
+    /^\/\/# sourceMappingURL=.*$/gm,
+    "",
+  );
+  await writeFile(
+    path.join(ROOT, "client.js"),
+    moduleLoaderShell(body),
+    "utf8",
+  );
 }
 
 async function summary() {
-  const client = await readFile(path.join(ROOT, 'client.js'), 'utf8');
-  const check = (label, ok) => process.stdout.write(`  ${ok ? '✓' : '✗'} ${label}\n`);
-  process.stdout.write('\n产物自检：\n');
-  check('client.js 使用 __ModuleLoader__.load', client.includes('__ModuleLoader__.load('));
-  check(`client.js 注册 id 为 ${CLIENT_ID}`, client.includes(`id: "${CLIENT_ID}"`));
-  check('client.js 只外部化 react', !/require\("@deepseek-ai\//.test(client));
-  check('client.js 导出 apply', /apply/.test(client));
-  process.stdout.write(`\n  client.js ${client.length.toLocaleString()} 字节\n`);
+  const client = await readFile(path.join(ROOT, "client.js"), "utf8");
+  const check = (label, ok) =>
+    process.stdout.write(`  ${ok ? "✓" : "✗"} ${label}\n`);
+  process.stdout.write("\n产物自检：\n");
+  check(
+    "client.js 使用 __ModuleLoader__.load",
+    client.includes("__ModuleLoader__.load("),
+  );
+  check(
+    `client.js 注册 id 为 ${CLIENT_ID}`,
+    client.includes(`id: "${CLIENT_ID}"`),
+  );
+  check("client.js 只外部化 react", !/require\("@deepseek-ai\//.test(client));
+  check("client.js 导出 apply", /apply/.test(client));
+  process.stdout.write(
+    `\n  client.js ${client.length.toLocaleString()} 字节\n`,
+  );
 }
 
 async function main() {
-  process.stdout.write('构建 乔木 Home (qiaomu-home-dsh)\n');
+  process.stdout.write("构建 乔木 Home (qiaomu-home-dsh)\n");
   await rm(STAGE, { recursive: true, force: true });
+  await build({
+    entryPoints: [path.join(ROOT, "src/host/service.js")],
+    outfile: path.join(ROOT, "index.js"),
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: "node22",
+    banner: {
+      js: "import {createRequire as __nodeRequire} from 'node:module';const require=__nodeRequire(import.meta.url);",
+    },
+    external: ["@deepseek-ai/cordis", "@deepseek-ai/dsh-typert-protocol"],
+    legalComments: "eof",
+  });
   await buildClient();
   await rm(STAGE, { recursive: true, force: true });
   await summary();
-  process.stdout.write(`\n完成${dev ? '（开发模式，含 sourcemap）' : ''}。\n`);
+  process.stdout.write(`\n完成${dev ? "（开发模式，含 sourcemap）" : ""}。\n`);
 }
 
 main().catch((error) => {

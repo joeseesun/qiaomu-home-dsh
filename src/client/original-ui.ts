@@ -456,3 +456,37 @@ export class SecretComponent {
     return this;
   }
 }
+
+/** Lifecycle hooks delegate to the owning Harness mount, command registry and state lane. */
+export class Plugin extends Component {
+  constructor(
+    public app: any,
+    public manifest: any,
+  ) {
+    super();
+  }
+  loadData() {
+    return this.app.home.state.getSnapshot()?.data;
+  }
+  saveData(data: any) {
+    return this.app.home.state.save(data);
+  }
+  registerView(type: string, factory: any) {
+    return this.app.home.registerView(type, factory);
+  }
+  addSettingTab(tab: any) {
+    return this.app.home.registerSettings(tab);
+  }
+  addCommand(command: any) {
+    this.register(
+      this.app.home.registerCommand(
+        this.manifest.id + ":" + command.id,
+        command,
+      ),
+    );
+    return command;
+  }
+  addRibbonIcon(icon: string, label: string, run: () => void) {
+    return this.app.home.registerLauncher({ icon, label, run });
+  }
+}

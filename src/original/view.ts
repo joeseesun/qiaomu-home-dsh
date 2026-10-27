@@ -998,6 +998,7 @@ export class HomeView extends ItemView {
         if (moduleOptions(this.plugin.settings, id, page.id).visible) this.renderDiscovery(next, id);
       }
       if (moduleOptions(this.plugin.settings, "beginner-plugins", page.id).visible) renderBeginnerPlugins(next, this.plugin, page.id, moduleOptions(this.plugin.settings, "beginner-plugins", page.id).limit, this.expandedGuides);
+      this.plugin.app.home?.renderNativeModules?.(next, page.id, (id, title, icon) => this.nativeCard(next, id, title, icon));
       this.renderRecommendations(next);
       for (const group of page.shortcutGroups) {
         if (moduleOptions(this.plugin.settings, shortcutModuleId(group.id), page.id).visible) renderShortcutGroup(next, this.plugin, page.id, group, this.editing, this.dragFeedback, (active) => { this.shortcutDragging = active; });
