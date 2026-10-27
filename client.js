@@ -38915,10 +38915,283 @@ function createProviderRegistry() {
 // src/client/home-runtime.ts
 init_original_globals();
 
-// src/original/main.ts
+// src/client/legacy-preferences.ts
 init_original_globals();
 
-// src/original/update-notes.ts
+// src/client/data.js
+init_original_globals();
+var CURATED = [
+  ["Q1p7bh3SHj8", "photo-1451187580459-43490279c0fa", "NASA", "nasa", "#0c2626"],
+  ["phIFdC6lA4E", "photo-1519681393784-d120267933ba", "Benjamin Voros", "vorosbenisop", "#0c2659"],
+  ["sO-JmQj95ec", "photo-1492724724894-7464c27d0ceb", "Kevin Lanceplaine", "lanceplaine", "#262640"],
+  ["c9MFM8rSMsQ", "photo-1541599468348-e96984315921", "Michelle Spollen", "micki", "#264059"],
+  ["oUTmhg97gzY", "photo-1615390265246-72d3198a48b7", "\xC1sa Steinarsd\xF3ttir", "asast", "#0c4040"],
+  ["NRQV-hBF10M", "photo-1506744038136-46273834b3fb", "Bailey Zindel", "baileyzindel", "#405949"],
+  ["1Z2niiBPg5A", "photo-1470071459604-3b5ec3a7fe05", "v2osk", "v2osk", "#404040"],
+  ["JgOeRuGD_Y4", "photo-1477346611705-65d1883cee1e", "JOHN TOWNER", "heytowner", "#260c26"],
+  ["DlkF4-dbCOU", "photo-1493246507139-91e8fad9978e", "garrett parker", "garrettpsystems", "#262626"],
+  ["6KQETG8J-zI", "photo-1581610186406-5f6e9f9edbc1", "Daniel Olah", "danesduet", "#0c2640"],
+  ["hvrpOmuMrAI", "photo-1500673922987-e212871fec22", "Johannes Plenio", "jplenio", "#262626"],
+  ["RwHv7LgeC7s", "photo-1523712999610-f77fbcfc3843", "Johannes Plenio", "jplenio", "#59260c"],
+  ["_RBcxo9AU-U", "photo-1472214103451-9374bd1c798e", "Robert Lukeman", "robertlukeman", "#40590c"],
+  ["17_tB-oI0ao", "photo-1551309292-e185c0b6e22a", "Alessio Soggetti", "asoggetti", "#0c2626"],
+  ["2Hzmz15wGik", "photo-1511884642898-4c92249e20b6", "pine watt", "pinewatt", "#262626"],
+  ["7BjhtdogU3A", "photo-1475070929565-c985b496cb9f", "Karsten W\xFCrth", "karsten_wuerth", "#262626"],
+  ["GA09PKfRIQY", "photo-1559310589-2673bfe16970", "Adam Vradenburg", "vradenburg", "#0c2626"],
+  ["z_f2JrBRbOg", "photo-1603979649806-5299879db16b", "Ansgar Scheffold", "ansgarscheffold", "#26260c"],
+  ["sGptUDSrMVU", "photo-1623423415485-1d36867376b6", "Annegret Kammer", "anneeaway", "#0c2626"],
+  ["KMn4VEeEPR8", "photo-1507525428034-b723cf961d3e", "Sean Oulashin", "oulashin", "#4c6259"]
+];
+var UTM = "utm_source=qiaomu_home_dsh&utm_medium=referral";
+function curatedPhotos() {
+  return CURATED.map(([id, path, author, username, color]) => ({
+    id: `curated:${id}`,
+    url: `https://images.unsplash.com/${path}`,
+    author,
+    authorUrl: `https://unsplash.com/@${username}?${UTM}`,
+    page: `https://unsplash.com/photos/${id}?${UTM}`,
+    color
+  }));
+}
+function dailyIndex(day, length, offset = 0) {
+  if (length <= 0) return -1;
+  let hash = 2166136261;
+  for (const char of day) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (((hash >>> 0) + offset) % length + length) % length;
+}
+function dayKey(date = /* @__PURE__ */ new Date()) {
+  const m2 = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${m2}-${d}`;
+}
+var WEATHER_CITIES = [
+  { id: "beijing", label: "\u5317\u4EAC", labelEn: "Beijing", latitude: 39.9042, longitude: 116.4074 },
+  { id: "shanghai", label: "\u4E0A\u6D77", labelEn: "Shanghai", latitude: 31.2304, longitude: 121.4737 },
+  { id: "shenzhen", label: "\u6DF1\u5733", labelEn: "Shenzhen", latitude: 22.5431, longitude: 114.0579 },
+  { id: "hangzhou", label: "\u676D\u5DDE", labelEn: "Hangzhou", latitude: 30.2741, longitude: 120.1551 },
+  { id: "chengdu", label: "\u6210\u90FD", labelEn: "Chengdu", latitude: 30.5728, longitude: 104.0668 },
+  { id: "tokyo", label: "\u4E1C\u4EAC", labelEn: "Tokyo", latitude: 35.6762, longitude: 139.6503 },
+  { id: "singapore", label: "\u65B0\u52A0\u5761", labelEn: "Singapore", latitude: 1.3521, longitude: 103.8198 },
+  { id: "newyork", label: "\u7EBD\u7EA6", labelEn: "New York", latitude: 40.7128, longitude: -74.006 },
+  { id: "london", label: "\u4F26\u6566", labelEn: "London", latitude: 51.5072, longitude: -0.1276 },
+  { id: "berlin", label: "\u67CF\u6797", labelEn: "Berlin", latitude: 52.52, longitude: 13.405 }
+];
+function normalizeUrl(input) {
+  try {
+    const url = new URL(String(input ?? "").trim());
+    if ((url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password) return url.href;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function quickNotesMarkdown(notes) {
+  const byDay = /* @__PURE__ */ new Map();
+  for (const note of [...notes].reverse()) {
+    const key = dayKey(new Date(note.time));
+    if (!byDay.has(key)) byDay.set(key, []);
+    const date = new Date(note.time);
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    byDay.get(key).push(`- ${hh}:${mm} ${note.text}`);
+  }
+  const lines = [];
+  for (const [day, items] of byDay) lines.push(`## ${day}`, "", ...items, "");
+  return lines.join("\n").trim();
+}
+var DAILY_QUESTIONS = {
+  zh: [
+    "\u4ECA\u5929\u6700\u91CD\u8981\u7684\u4E00\u4EF6\u4E8B\u662F\u4EC0\u4E48\uFF1F",
+    "\u6700\u8FD1\u6709\u4EC0\u4E48\u8BA9\u4F60\u4F1A\u5FC3\u4E00\u7B11\u7684\u77AC\u95F4\uFF1F",
+    "\u73B0\u5728\u6700\u5360\u7528\u4F60\u5FC3\u529B\u7684\u4E8B\u662F\u4EC0\u4E48\uFF1F",
+    "\u8FD9\u5468\u60F3\u5BF9\u81EA\u5DF1\u8BF4\u53E5\u4EC0\u4E48\u8BDD\uFF1F",
+    "\u6709\u4EC0\u4E48\u4E00\u76F4\u60F3\u5F00\u59CB\u5374\u8FD8\u6CA1\u5F00\u59CB\u7684\u4E8B\uFF1F",
+    "\u4ECA\u5929\u5B66\u5230\u4E86\u4EC0\u4E48\u65B0\u4E1C\u897F\uFF1F",
+    "\u6700\u8FD1\u8C01\u5E2E\u52A9\u8FC7\u4F60\uFF1F\u60F3\u600E\u4E48\u611F\u8C22\uFF1F",
+    "\u6B64\u523B\u6700\u8BA9\u4F60\u5B89\u5FC3\u7684\u662F\u4EC0\u4E48\uFF1F",
+    "\u5982\u679C\u4ECA\u5929\u53EA\u505A\u4E00\u4EF6\u4E8B\uFF0C\u4F1A\u662F\u54EA\u4EF6\uFF1F",
+    "\u6700\u8FD1\u6709\u4EC0\u4E48\u51B3\u5B9A\u4E00\u76F4\u5728\u62D6\u5EF6\uFF1F",
+    "\u4ECA\u5929\u8EAB\u4F53\u611F\u89C9\u600E\u4E48\u6837\uFF1F",
+    "\u6700\u8FD1\u5728\u8BFB/\u5728\u770B\u4EC0\u4E48\uFF1F\u503C\u5F97\u63A8\u8350\u5417\uFF1F",
+    "\u6709\u4EC0\u4E48\u60F3\u6CD5\u6700\u8FD1\u4E00\u76F4\u5728\u8111\u5B50\u91CC\u8F6C\uFF1F",
+    "\u8FD9\u4E2A\u6708\u60F3\u517B\u6210\u6216\u6212\u6389\u4EC0\u4E48\u4E60\u60EF\uFF1F",
+    "\u73B0\u5728\u7684\u5DE5\u4F5C\u65B9\u5F0F\u91CC\uFF0C\u54EA\u4E00\u70B9\u6700\u60F3\u6539\u8FDB\uFF1F"
+  ],
+  en: [
+    "What is the single most important thing today?",
+    "What made you smile recently?",
+    "What is occupying your mind the most right now?",
+    "What would you tell yourself this week?",
+    "What have you been meaning to start but haven\u2019t?",
+    "What did you learn today?",
+    "Who helped you recently, and how could you thank them?",
+    "What gives you peace of mind right now?",
+    "If you could do only one thing today, what would it be?",
+    "Which decision have you been putting off?",
+    "How does your body feel today?",
+    "What are you reading or watching lately? Worth recommending?",
+    "Which idea keeps circling in your head?",
+    "What habit do you want to build or drop this month?",
+    "What would you improve about how you work right now?"
+  ]
+};
+var SEARCH_GROUPS = [
+  {
+    id: "web",
+    zh: "\u591A\u7AD9\u641C\u7D22",
+    en: "Search across sites",
+    sites: [
+      { id: "google", zh: "\u8C37\u6B4C", en: "Google", home: "https://www.google.com/", search: (q2) => `https://www.google.com/search?q=${encodeURIComponent(q2)}` },
+      { id: "bing", zh: "\u5FC5\u5E94", en: "Bing", home: "https://www.bing.com/", search: (q2) => `https://www.bing.com/search?q=${encodeURIComponent(q2)}` },
+      { id: "duckduckgo", zh: "DuckDuckGo", en: "DuckDuckGo", home: "https://duckduckgo.com/", search: (q2) => `https://duckduckgo.com/?q=${encodeURIComponent(q2)}` },
+      { id: "wikipedia", zh: "\u7EF4\u57FA\u767E\u79D1", en: "Wikipedia", home: "https://www.wikipedia.org/", search: (q2) => `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(q2)}` },
+      { id: "baidu", zh: "\u767E\u5EA6", en: "Baidu", off: true, home: "https://www.baidu.com/", search: (q2) => `https://www.baidu.com/s?wd=${encodeURIComponent(q2)}` },
+      { id: "brave", zh: "Brave", en: "Brave", off: true, home: "https://search.brave.com/", search: (q2) => `https://search.brave.com/search?q=${encodeURIComponent(q2)}` },
+      { id: "github", zh: "GitHub", en: "GitHub", off: true, home: "https://github.com/", search: (q2) => `https://github.com/search?q=${encodeURIComponent(q2)}` },
+      { id: "zhihu", zh: "\u77E5\u4E4E", en: "Zhihu", off: true, home: "https://www.zhihu.com/", search: (q2) => `https://www.zhihu.com/search?type=content&q=${encodeURIComponent(q2)}` }
+    ]
+  },
+  {
+    id: "books",
+    zh: "\u627E\u7535\u5B50\u4E66",
+    en: "Find books",
+    sites: [
+      { id: "openlibrary", zh: "Open Library", en: "Open Library", home: "https://openlibrary.org/", search: (q2) => `https://openlibrary.org/search?q=${encodeURIComponent(q2)}` },
+      { id: "gutenberg", zh: "\u53E4\u817E\u5821\u8BA1\u5212", en: "Project Gutenberg", home: "https://www.gutenberg.org/", search: (q2) => `https://www.gutenberg.org/ebooks/?query=${encodeURIComponent(q2)}` },
+      { id: "douban-book", zh: "\u8C46\u74E3\u8BFB\u4E66", en: "Douban Books", home: "https://book.douban.com/", search: (q2) => `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(q2)}` },
+      { id: "google-books", zh: "Google \u56FE\u4E66", en: "Google Books", home: "https://books.google.com/", search: (q2) => `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(q2)}` }
+    ]
+  },
+  {
+    id: "video",
+    zh: "\u627E\u89C6\u9891\u4E0E\u7535\u5F71",
+    en: "Find video and film",
+    sites: [
+      { id: "youtube", zh: "YouTube", en: "YouTube", home: "https://www.youtube.com/", search: (q2) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q2)}` },
+      { id: "bilibili", zh: "\u54D4\u54E9\u54D4\u54E9", en: "Bilibili", home: "https://www.bilibili.com/", search: (q2) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(q2)}` },
+      { id: "imdb", zh: "IMDb", en: "IMDb", home: "https://www.imdb.com/", search: (q2) => `https://www.imdb.com/find/?q=${encodeURIComponent(q2)}` },
+      { id: "douban-movie", zh: "\u8C46\u74E3\u7535\u5F71", en: "Douban Movies", home: "https://movie.douban.com/", search: (q2) => `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(q2)}` },
+      { id: "justwatch", zh: "JustWatch", en: "JustWatch", home: "https://www.justwatch.com/", search: (q2) => `https://www.justwatch.com/us/search?q=${encodeURIComponent(q2)}` }
+    ]
+  },
+  {
+    id: "music",
+    zh: "Spotify \u641C\u7D22",
+    en: "Search Spotify",
+    sites: [
+      { id: "spotify", zh: "Spotify", en: "Spotify", home: "https://open.spotify.com/", search: (q2) => `https://open.spotify.com/search/${encodeURIComponent(q2)}` }
+    ]
+  },
+  {
+    id: "ai",
+    zh: "\u5B66 AI",
+    en: "Learn AI",
+    sites: [
+      { id: "openai-academy", zh: "OpenAI Academy", en: "OpenAI Academy", home: "https://academy.openai.com/" },
+      { id: "hf-learn", zh: "Hugging Face Learn", en: "Hugging Face Learn", home: "https://huggingface.co/learn" },
+      { id: "deeplearning-ai", zh: "DeepLearning.AI", en: "DeepLearning.AI", home: "https://www.deeplearning.ai/short-courses/" },
+      { id: "fast-ai", zh: "fast.ai", en: "fast.ai", home: "https://course.fast.ai/" }
+    ]
+  },
+  {
+    id: "papers",
+    zh: "\u627E\u8BBA\u6587",
+    en: "Find papers",
+    sites: [
+      { id: "arxiv", zh: "arXiv", en: "arXiv", home: "https://arxiv.org/", search: (q2) => `https://arxiv.org/search/?query=${encodeURIComponent(q2)}&searchtype=all` },
+      { id: "crossref", zh: "Crossref", en: "Crossref", home: "https://search.crossref.org/", search: (q2) => `https://search.crossref.org/?q=${encodeURIComponent(q2)}` },
+      { id: "semantic-scholar", zh: "Semantic Scholar", en: "Semantic Scholar", home: "https://www.semanticscholar.com/", search: (q2) => `https://www.semanticscholar.org/search?q=${encodeURIComponent(q2)}` },
+      { id: "google-scholar", zh: "Google \u5B66\u672F", en: "Google Scholar", home: "https://scholar.google.com/", search: (q2) => `https://scholar.google.com/scholar?q=${encodeURIComponent(q2)}` }
+    ]
+  },
+  {
+    id: "words",
+    zh: "\u67E5\u8BCD",
+    en: "Look up a word",
+    sites: [
+      { id: "cambridge", zh: "\u5251\u6865\u8BCD\u5178", en: "Cambridge Dictionary", home: "https://dictionary.cambridge.org/", search: (q2) => `https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(q2)}` },
+      { id: "wiktionary", zh: "\u7EF4\u57FA\u8BCD\u5178", en: "Wiktionary", home: "https://en.wiktionary.org/", search: (q2) => `https://en.wiktionary.org/w/index.php?search=${encodeURIComponent(q2)}` },
+      { id: "youdao", zh: "\u6709\u9053\u8BCD\u5178", en: "Youdao", home: "https://dict.youdao.com/", search: (q2) => `https://dict.youdao.com/result?word=${encodeURIComponent(q2)}&lang=en` },
+      { id: "merriam-webster", zh: "\u97E6\u6C0F\u8BCD\u5178", en: "Merriam-Webster", home: "https://www.merriam-webster.com/", search: (q2) => `https://www.merriam-webster.com/dictionary/${encodeURIComponent(q2)}` }
+    ]
+  },
+  {
+    id: "translate",
+    zh: "\u7FFB\u8BD1",
+    en: "Translate",
+    sites: [
+      { id: "google-translate", zh: "Google \u7FFB\u8BD1", en: "Google Translate", home: "https://translate.google.com/", search: (q2) => `https://translate.google.com/?sl=auto&tl=${translateTarget(q2)}&text=${encodeURIComponent(q2)}&op=translate` },
+      { id: "deepl", zh: "DeepL", en: "DeepL", home: "https://www.deepl.com/translator", search: (q2) => `https://www.deepl.com/translator#auto/${translateTarget(q2)}/${encodeURIComponent(q2).replace(/%2F/gi, "%5C%2F")}` },
+      { id: "bing-translate", zh: "\u5FC5\u5E94\u7FFB\u8BD1", en: "Bing Translator", home: "https://www.bing.com/translator", search: (q2) => `https://www.bing.com/translator?from=auto-detect&to=${translateTarget(q2) === "zh" ? "zh-Hans" : "en"}&text=${encodeURIComponent(q2)}` }
+    ]
+  },
+  {
+    id: "dev",
+    zh: "GitHub \u5F85\u529E",
+    en: "GitHub inbox",
+    sites: [
+      { id: "github-search", zh: "\u641C\u7D22\u4ED3\u5E93", en: "Search repositories", home: "https://github.com/search", search: (q2) => `https://github.com/search?q=${encodeURIComponent(q2)}&type=repositories` },
+      { id: "github-reviews", zh: "\u5F85\u6211\u5BA1\u9605", en: "Review requests", home: "https://github.com/pulls/review-requested" },
+      { id: "github-pulls", zh: "\u6211\u7684 PR", en: "My pull requests", home: "https://github.com/pulls" },
+      { id: "github-issues", zh: "\u5206\u914D\u7ED9\u6211", en: "Assigned issues", home: "https://github.com/issues/assigned" },
+      { id: "github-notifications", zh: "\u901A\u77E5", en: "Notifications", home: "https://github.com/notifications" }
+    ]
+  }
+];
+function translateTarget(text3) {
+  return /[\u3400-\u9fff]/.test(text3) ? "en" : "zh";
+}
+function groupSites(groupId, customSites = []) {
+  const group = SEARCH_GROUPS.find((entry) => entry.id === groupId);
+  if (!group) return [];
+  return groupId === "web" ? [...group.sites, ...customSites] : group.sites;
+}
+function defaultSiteIds(groupId, customSites = []) {
+  const sites = groupSites(groupId, customSites);
+  const on2 = sites.filter((site) => !site.off);
+  return (on2.length ? on2 : sites.slice(0, 1)).map((site) => site.id);
+}
+function parseSearchTemplates(input) {
+  const lines = String(input ?? "").split(/\r?\n/).filter((line) => line.trim()).slice(0, 8);
+  const sites = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const separator = line.indexOf("|");
+    const name = line.slice(0, separator).trim();
+    const url = line.slice(separator + 1).trim();
+    if (separator < 1 || !name || !url.includes("{query}")) {
+      return { ok: false, error: { key: "multiSearch.templateLine", params: { line: index + 1 } } };
+    }
+    let parsed;
+    try {
+      parsed = new URL(url.replaceAll("{query}", "test"));
+    } catch {
+      return { ok: false, error: { key: "multiSearch.templateLine", params: { line: index + 1 } } };
+    }
+    if (parsed.origin !== new URL(url.replaceAll("{query}", "other")).origin) {
+      return { ok: false, error: { key: "multiSearch.templateQuery", params: { line: index + 1 } } };
+    }
+    if (!["https:", "http:"].includes(parsed.protocol) || parsed.username || parsed.password) {
+      return { ok: false, error: { key: "multiSearch.templateUrl", params: { line: index + 1 } } };
+    }
+    sites.push({
+      id: `custom:${url}`,
+      zh: name.slice(0, 60),
+      en: name.slice(0, 60),
+      home: new URL(url.replaceAll("{query}", "")).origin,
+      search: (query) => url.replaceAll("{query}", encodeURIComponent(query))
+    });
+  }
+  return { ok: true, sites };
+}
+
+// src/original/discovery.ts
+init_original_globals();
+
+// src/original/i18n.ts
 init_original_globals();
 
 // src/client/original-ui.ts
@@ -39393,252 +39666,6 @@ var Plugin = class extends Component2 {
     return this.app.home.registerLauncher({ icon, label: label2, run });
   }
 };
-
-// src/original/update-notes-i18n.ts
-init_original_globals();
-var messages = {
-  title: ["\u66F4\u65B0\u5185\u5BB9", "What\u2019s new", "\u66F4\u65B0\u5167\u5BB9", "\u65B0\u7740\u60C5\u5831", "\uC5C5\uB370\uC774\uD2B8 \uB0B4\uC6A9", "Novedades", "Nouveaut\xE9s", "Neuerungen", "Novidades", "\u0427\u0442\u043E \u043D\u043E\u0432\u043E\u0433\u043E", "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F"],
-  view: ["\u67E5\u770B\u66F4\u65B0\u5185\u5BB9", "View what\u2019s new", "\u67E5\u770B\u66F4\u65B0\u5167\u5BB9", "\u66F4\u65B0\u5185\u5BB9\u3092\u898B\u308B", "\uC5C5\uB370\uC774\uD2B8 \uB0B4\uC6A9 \uBCF4\uAE30", "Ver novedades", "Voir les nouveaut\xE9s", "Neuerungen ansehen", "Ver novidades", "\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F", "\u0639\u0631\u0636 \u0627\u0644\u0645\u0633\u062A\u062C\u062F\u0627\u062A"],
-  done: ["\u77E5\u9053\u4E86", "Got it", "\u77E5\u9053\u4E86", "\u78BA\u8A8D", "\uD655\uC778", "Entendido", "Compris", "Verstanden", "Entendi", "\u041F\u043E\u043D\u044F\u0442\u043D\u043E", "\u062D\u0633\u0646\u064B\u0627"],
-  automatic: ["\u66F4\u65B0\u540E\u81EA\u52A8\u663E\u793A", "Show after updates", "\u66F4\u65B0\u5F8C\u81EA\u52D5\u986F\u793A", "\u66F4\u65B0\u5F8C\u306B\u81EA\u52D5\u8868\u793A", "\uC5C5\uB370\uC774\uD2B8 \uD6C4 \uC790\uB3D9 \uD45C\uC2DC", "Mostrar tras actualizar", "Afficher apr\xE8s les mises \xE0 jour", "Nach Updates anzeigen", "Mostrar ap\xF3s atualizar", "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439", "\u0627\u0644\u0639\u0631\u0636 \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u062F\u064A\u062B\u0627\u062A"],
-  saveError: ["\u66F4\u65B0\u63D0\u793A\u7684\u504F\u597D\u672A\u80FD\u4FDD\u5B58\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002", "Could not save update preferences. Please try again.", "\u7121\u6CD5\u5132\u5B58\u66F4\u65B0\u63D0\u793A\u504F\u597D\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002", "\u66F4\u65B0\u901A\u77E5\u306E\u8A2D\u5B9A\u3092\u4FDD\u5B58\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002", "\uC5C5\uB370\uC774\uD2B8 \uC54C\uB9BC \uC124\uC815\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.", "No se pudieron guardar las preferencias. Int\xE9ntalo de nuevo.", "Impossible d\u2019enregistrer les pr\xE9f\xE9rences. R\xE9essayez.", "Update-Einstellungen konnten nicht gespeichert werden. Bitte erneut versuchen.", "N\xE3o foi poss\xEDvel salvar as prefer\xEAncias. Tente novamente.", "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437.", "\u062A\u0639\u0630\u0631 \u062D\u0641\u0638 \u062A\u0641\u0636\u064A\u0644\u0627\u062A \u0627\u0644\u062A\u062D\u062F\u064A\u062B. \u064A\u064F\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u064B\u0627."],
-  smooth: ["\u4E3B\u9875\u6EDA\u52A8\u66F4\u6D41\u7545\uFF1A\u5373\u4F7F\u5173\u95ED\u4E86\u786C\u4EF6\u52A0\u901F\uFF0C\u6BDB\u73BB\u7483\u5361\u7247\u4E5F\u80FD\u6EE1\u5E27\u6EDA\u52A8\uFF0C\u5916\u89C2\u4E0D\u53D8\u3002", "Home scrolls smoothly even with hardware acceleration off; the frosted cards look the same.", "\u9996\u9801\u6372\u52D5\u66F4\u6D41\u66A2\uFF1A\u5373\u4F7F\u95DC\u9589\u786C\u9AD4\u52A0\u901F\uFF0C\u6BDB\u73BB\u7483\u5361\u7247\u4E5F\u80FD\u6EFF\u5E40\u6372\u52D5\uFF0C\u5916\u89C0\u4E0D\u8B8A\u3002", "\u30CF\u30FC\u30C9\u30A6\u30A7\u30A2\u30A2\u30AF\u30BB\u30E9\u30EC\u30FC\u30B7\u30E7\u30F3\u304C\u30AA\u30D5\u3067\u3082\u30DB\u30FC\u30E0\u304C\u306A\u3081\u3089\u304B\u306B\u30B9\u30AF\u30ED\u30FC\u30EB\u3057\u307E\u3059\u3002\u898B\u305F\u76EE\u306F\u5909\u308F\u308A\u307E\u305B\u3093\u3002", "\uD558\uB4DC\uC6E8\uC5B4 \uAC00\uC18D\uC744 \uAEBC\uB3C4 \uD648\uC774 \uBD80\uB4DC\uB7FD\uAC8C \uC2A4\uD06C\uB864\uB429\uB2C8\uB2E4. \uD654\uBA74 \uBAA8\uC591\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4.", "Inicio se desplaza con fluidez incluso sin aceleraci\xF3n por hardware, con el mismo aspecto.", "L\u2019accueil d\xE9file en douceur m\xEAme sans acc\xE9l\xE9ration mat\xE9rielle, avec le m\xEAme rendu.", "Die Startseite scrollt auch ohne Hardwarebeschleunigung fl\xFCssig \u2013 bei gleichem Aussehen.", "A p\xE1gina inicial rola com fluidez mesmo sem acelera\xE7\xE3o de hardware, com a mesma apar\xEAncia.", "\u0413\u043B\u0430\u0432\u043D\u0430\u044F \u043F\u0440\u043E\u043A\u0440\u0443\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043F\u043B\u0430\u0432\u043D\u043E \u0434\u0430\u0436\u0435 \u0431\u0435\u0437 \u0430\u043F\u043F\u0430\u0440\u0430\u0442\u043D\u043E\u0433\u043E \u0443\u0441\u043A\u043E\u0440\u0435\u043D\u0438\u044F; \u0432\u043D\u0435\u0448\u043D\u0438\u0439 \u0432\u0438\u0434 \u043F\u0440\u0435\u0436\u043D\u0438\u0439.", "\u062A\u062A\u0645\u0631\u0631 \u0627\u0644\u0635\u0641\u062D\u0629 \u0627\u0644\u0631\u0626\u064A\u0633\u064A\u0629 \u0628\u0633\u0644\u0627\u0633\u0629 \u062D\u062A\u0649 \u0645\u0639 \u0625\u064A\u0642\u0627\u0641 \u062A\u0633\u0631\u064A\u0639 \u0627\u0644\u0623\u062C\u0647\u0632\u0629\u060C \u0628\u0627\u0644\u0645\u0638\u0647\u0631 \u0646\u0641\u0633\u0647."],
-  steady: ["\u5237\u65B0\u3001\u5207\u6362\u6807\u7B7E\u548C\u641C\u7D22\u8F93\u5165\u4E0D\u518D\u95EA\u70C1\u6216\u5361\u987F\u3002", "Refreshing, switching tabs and typing in search no longer flicker or stutter.", "\u91CD\u65B0\u6574\u7406\u3001\u5207\u63DB\u5206\u9801\u548C\u641C\u5C0B\u8F38\u5165\u4E0D\u518D\u9583\u720D\u6216\u5361\u9813\u3002", "\u66F4\u65B0\u3001\u30BF\u30D6\u306E\u5207\u308A\u66FF\u3048\u3001\u691C\u7D22\u5165\u529B\u3067\u3061\u3089\u3064\u304D\u3084\u5F15\u3063\u304B\u304B\u308A\u304C\u306A\u304F\u306A\u308A\u307E\u3057\u305F\u3002", "\uC0C8\uB85C \uACE0\uCE68, \uD0ED \uC804\uD658, \uAC80\uC0C9 \uC785\uB825 \uC2DC \uAE5C\uBE61\uC784\uACFC \uB04A\uAE40\uC774 \uC0AC\uB77C\uC84C\uC2B5\uB2C8\uB2E4.", "Actualizar, cambiar de pesta\xF1a y escribir en la b\xFAsqueda ya no parpadea ni se traba.", "Actualiser, changer d\u2019onglet et saisir une recherche ne clignotent plus et ne saccadent plus.", "Aktualisieren, Tabwechsel und Tippen in der Suche flackern und ruckeln nicht mehr.", "Atualizar, trocar de aba e digitar na busca n\xE3o piscam nem travam mais.", "\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435, \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u0430\u0434\u043E\u043A \u0438 \u0432\u0432\u043E\u0434 \u0432 \u043F\u043E\u0438\u0441\u043A\u0435 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043C\u0435\u0440\u0446\u0430\u044E\u0442 \u0438 \u043D\u0435 \u043F\u043E\u0434\u0442\u043E\u0440\u043C\u0430\u0436\u0438\u0432\u0430\u044E\u0442.", "\u0644\u0645 \u064A\u0639\u062F \u0627\u0644\u062A\u062D\u062F\u064A\u062B \u0648\u062A\u0628\u062F\u064A\u0644 \u0639\u0644\u0627\u0645\u0627\u062A \u0627\u0644\u062A\u0628\u0648\u064A\u0628 \u0648\u0627\u0644\u0643\u062A\u0627\u0628\u0629 \u0641\u064A \u0627\u0644\u0628\u062D\u062B \u064A\u0648\u0645\u0636 \u0623\u0648 \u064A\u062A\u0642\u0637\u0639."],
-  introduced: ["\u65B0\u589E\u66F4\u65B0\u63D0\u793A\uFF1A\u5347\u7EA7\u540E\u5373\u53EF\u770B\u5230\u672C\u6B21\u53D8\u5316\uFF0C\u540C\u4E00\u7248\u672C\u53EA\u81EA\u52A8\u663E\u793A\u4E00\u6B21\u3002", "New update notes show what changed after an upgrade, once per version.", "\u65B0\u589E\u66F4\u65B0\u63D0\u793A\uFF1A\u5347\u7D1A\u5F8C\u5373\u53EF\u67E5\u770B\u672C\u6B21\u8B8A\u5316\uFF0C\u540C\u4E00\u7248\u672C\u53EA\u81EA\u52D5\u986F\u793A\u4E00\u6B21\u3002", "\u66F4\u65B0\u5F8C\u306B\u5909\u66F4\u70B9\u3092\u8868\u793A\u3059\u308B\u3088\u3046\u306B\u306A\u308A\u307E\u3057\u305F\u3002\u81EA\u52D5\u8868\u793A\u306F\u5404\u30D0\u30FC\u30B8\u30E7\u30F3\u306B\u3064\u304D\u4E00\u5EA6\u3060\u3051\u3067\u3059\u3002", "\uC5C5\uB370\uC774\uD2B8 \uD6C4 \uBCC0\uACBD \uC0AC\uD56D\uC744 \uBC84\uC804\uB9C8\uB2E4 \uD55C \uBC88\uC529 \uC54C\uB824 \uB4DC\uB9BD\uB2C8\uB2E4.", "Las novedades aparecen una sola vez por versi\xF3n despu\xE9s de actualizar.", "Les nouveaut\xE9s s\u2019affichent une seule fois par version apr\xE8s une mise \xE0 jour.", "Nach einem Update werden die Neuerungen einmal pro Version angezeigt.", "As novidades aparecem uma vez por vers\xE3o ap\xF3s uma atualiza\xE7\xE3o.", "\u041F\u043E\u0441\u043B\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u043E\u0434\u0438\u043D \u0440\u0430\u0437 \u0434\u043B\u044F \u043A\u0430\u0436\u0434\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438.", "\u062A\u064F\u0639\u0631\u0636 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u062F\u064A\u062B \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0644\u0643\u0644 \u0625\u0635\u062F\u0627\u0631."],
-  revisit: ["\u60F3\u518D\u770B\u4E00\u6B21\uFF1F\u5728\u300C\u5173\u4E8E\u300D\u4E2D\u70B9\u51FB\u300C\u67E5\u770B\u66F4\u65B0\u5185\u5BB9\u300D\uFF0C\u4E5F\u53EF\u4ECE\u547D\u4EE4\u9762\u677F\u6253\u5F00\u3002", "Reopen these notes from About or the command palette at any time.", "\u60F3\u518D\u770B\u4E00\u6B21\uFF1F\u53EF\u5F9E\u300C\u95DC\u65BC\u300D\u6216\u547D\u4EE4\u9762\u677F\u91CD\u65B0\u958B\u555F\u66F4\u65B0\u5167\u5BB9\u3002", "\u3053\u306E\u5185\u5BB9\u306F\u300C\u3053\u306E\u30D7\u30E9\u30B0\u30A4\u30F3\u306B\u3064\u3044\u3066\u300D\u3084\u30B3\u30DE\u30F3\u30C9\u30D1\u30EC\u30C3\u30C8\u304B\u3089\u3044\u3064\u3067\u3082\u78BA\u8A8D\u3067\u304D\u307E\u3059\u3002", "\uC815\uBCF4 \uC124\uC815\uC774\uB098 \uBA85\uB839 \uD314\uB808\uD2B8\uC5D0\uC11C \uC5B8\uC81C\uB4E0 \uB2E4\uC2DC \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "Puedes volver a ver las novedades desde Acerca de o la paleta de comandos.", "Retrouvez ces notes dans \xC0 propos ou dans la palette de commandes.", "Diese Hinweise lassen sich jederzeit unter Info oder \xFCber die Befehlspalette \xF6ffnen.", "Reabra estas notas em Sobre ou na paleta de comandos quando quiser.", "\u042D\u0442\u0438 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u043C\u043E\u0436\u043D\u043E \u0441\u043D\u043E\u0432\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0432 \u0440\u0430\u0437\u0434\u0435\u043B\u0435 \xAB\u041E \u043F\u043B\u0430\u0433\u0438\u043D\u0435\xBB \u0438\u043B\u0438 \u0447\u0435\u0440\u0435\u0437 \u043F\u0430\u043B\u0438\u0442\u0440\u0443 \u043A\u043E\u043C\u0430\u043D\u0434.", "\u064A\u0645\u0643\u0646 \u0641\u062A\u062D \u0647\u0630\u0647 \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u062C\u062F\u062F\u064B\u0627 \u0645\u0646 \u0642\u0633\u0645 \xAB\u062D\u0648\u0644\xBB \u0623\u0648 \u0644\u0648\u062D\u0629 \u0627\u0644\u0623\u0648\u0627\u0645\u0631."],
-  control: ["\u4E0B\u65B9\u53EF\u5173\u95ED\u81EA\u52A8\u63D0\u793A\uFF1B\u66F4\u65B0\u5185\u5BB9\u4FDD\u5B58\u5728\u63D2\u4EF6\u5185\uFF0C\u79BB\u7EBF\u4E5F\u80FD\u67E5\u770B\u3002", "Turn off automatic notes below if you prefer. Notes are bundled and work offline.", "\u53EF\u5728\u4E0B\u65B9\u95DC\u9589\u81EA\u52D5\u63D0\u793A\uFF1B\u66F4\u65B0\u5167\u5BB9\u96A8\u63D2\u4EF6\u63D0\u4F9B\uFF0C\u96E2\u7DDA\u4E5F\u80FD\u67E5\u770B\u3002", "\u4E0B\u306E\u8A2D\u5B9A\u3067\u81EA\u52D5\u8868\u793A\u3092\u30AA\u30D5\u306B\u3067\u304D\u307E\u3059\u3002\u66F4\u65B0\u5185\u5BB9\u306F\u30AA\u30D5\u30E9\u30A4\u30F3\u3067\u3082\u8AAD\u3081\u307E\u3059\u3002", "\uC544\uB798\uC5D0\uC11C \uC790\uB3D9 \uD45C\uC2DC\uB97C \uB04C \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC624\uD504\uB77C\uC778\uC5D0\uC11C\uB3C4 \uB0B4\uC6A9\uC744 \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "Puedes desactivar el aviso autom\xE1tico abajo. Las notas tambi\xE9n funcionan sin conexi\xF3n.", "D\xE9sactivez l\u2019affichage automatique ci-dessous si vous le souhaitez. Lecture hors ligne disponible.", "Die automatische Anzeige kann unten deaktiviert werden. Die Hinweise sind auch offline verf\xFCgbar.", "Desative a exibi\xE7\xE3o autom\xE1tica abaixo, se preferir. As notas funcionam offline.", "\u0410\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043F\u043E\u043A\u0430\u0437 \u043C\u043E\u0436\u043D\u043E \u043E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043D\u0438\u0436\u0435. \u0417\u0430\u043C\u0435\u0442\u043A\u0438 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0438 \u0431\u0435\u0437 \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u0430.", "\u064A\u0645\u0643\u0646 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u0639\u0631\u0636 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A \u0623\u062F\u0646\u0627\u0647. \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u062A\u0627\u062D\u0629 \u062F\u0648\u0646 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A."],
-  fallback: ["\u5DF2\u5B89\u88C5\u65B0\u7248\u672C\u3002\u5B8C\u6574\u66F4\u65B0\u8BF4\u660E\u53EF\u5728\u63D2\u4EF6\u7684 GitHub Releases \u4E2D\u67E5\u770B\u3002", "A new version is installed. Full release notes are available on the plugin\u2019s GitHub Releases page.", "\u5DF2\u5B89\u88DD\u65B0\u7248\u672C\u3002\u5B8C\u6574\u66F4\u65B0\u8AAA\u660E\u53EF\u5728\u63D2\u4EF6\u7684 GitHub Releases \u67E5\u770B\u3002", "\u65B0\u3057\u3044\u30D0\u30FC\u30B8\u30E7\u30F3\u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u307E\u3057\u305F\u3002\u8A73\u3057\u3044\u5185\u5BB9\u306F\u30D7\u30E9\u30B0\u30A4\u30F3\u306E GitHub Releases \u3092\u3054\u89A7\u304F\u3060\u3055\u3044\u3002", "\uC0C8 \uBC84\uC804\uC774 \uC124\uCE58\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uC790\uC138\uD55C \uB0B4\uC6A9\uC740 \uD50C\uB7EC\uADF8\uC778\uC758 GitHub Releases\uC5D0\uC11C \uD655\uC778\uD558\uC138\uC694.", "Se instal\xF3 una nueva versi\xF3n. Consulta los detalles en GitHub Releases del complemento.", "Une nouvelle version est install\xE9e. Consultez les d\xE9tails sur GitHub Releases du plugin.", "Eine neue Version ist installiert. Details stehen auf der GitHub-Releases-Seite des Plugins.", "Uma nova vers\xE3o foi instalada. Veja os detalhes no GitHub Releases do plugin.", "\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430 \u043D\u043E\u0432\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F. \u041F\u043E\u043B\u043D\u043E\u0435 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u0432 GitHub Releases \u043F\u043B\u0430\u0433\u0438\u043D\u0430.", "\u062A\u0645 \u062A\u062B\u0628\u064A\u062A \u0625\u0635\u062F\u0627\u0631 \u062C\u062F\u064A\u062F. \u062A\u062A\u0648\u0641\u0631 \u0627\u0644\u062A\u0641\u0627\u0635\u064A\u0644 \u0641\u064A \u0635\u0641\u062D\u0629 \u0625\u0635\u062F\u0627\u0631\u0627\u062A \u0627\u0644\u0645\u0644\u062D\u0642 \u0639\u0644\u0649 GitHub."]
-};
-var UPDATE_LOCALES = ["zh", "en", "zh-TW", "ja", "ko", "es", "fr", "de", "pt", "ru", "ar"];
-function updateText(language, key) {
-  const code = String(language || "en").toLowerCase();
-  const locale = /^zh.*(tw|hk|mo|hant)/.test(code) ? "zh-TW" : code.split(/[-_]/)[0];
-  const index = UPDATE_LOCALES.findIndex((value) => value === locale);
-  return messages[key][index < 0 ? 1 : index] || messages[key][1];
-}
-
-// src/original/update-notes.ts
-var queueKey = /* @__PURE__ */ Symbol.for("qiaomu.update-notes.queue.v1");
-function compareVersions(a, b2) {
-  const left = a.split(".").map(Number), right = b2.split(".").map(Number);
-  for (let i = 0; i < Math.max(left.length, right.length); i++) {
-    const diff = (left[i] || 0) - (right[i] || 0);
-    if (diff) return Math.sign(diff);
-  }
-  return 0;
-}
-function readPreferences(raw) {
-  const value = raw && typeof raw === "object" ? raw : {};
-  return { seenVersion: typeof value.seenVersion === "string" && /^\d+\.\d+\.\d+$/.test(value.seenVersion) ? value.seenVersion : "", autoShow: value.autoShow !== false };
-}
-function unseenEntries(entries, seen, current) {
-  return entries.filter((entry) => compareVersions(entry.version, current) <= 0 && (!seen || compareVersions(entry.version, seen) > 0)).sort((a, b2) => compareVersions(b2.version, a.version));
-}
-function queueFor(app) {
-  const owner = app;
-  if (owner[queueKey]) return owner[queueKey];
-  const queue = { jobs: [], active: null, timer: null, pump: () => {
-  } };
-  queue.pump = () => {
-    if (!queue.jobs.length) {
-      if (queue.timer !== null) window.clearInterval(queue.timer);
-      queue.timer = null;
-      return;
-    }
-    if (queue.active) return;
-    const index = document.querySelector(".modal-container") ? queue.jobs.findIndex((job2) => job2.manual) : 0;
-    if (index < 0) return;
-    const job = queue.jobs.splice(index, 1)[0];
-    if (job) {
-      queue.active = job.id;
-      job.run();
-    }
-  };
-  owner[queueKey] = queue;
-  return queue;
-}
-var UpdateNotes = class {
-  constructor(plugin, entries, language = getLanguage) {
-    this.plugin = plugin;
-    this.entries = entries;
-    this.language = language;
-    this.path = normalizePath(`${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}/update-notes.json`);
-    this.ready = this.load();
-    plugin.addCommand({ id: "view-update-notes", name: this.text("view"), callback: () => this.show() });
-    plugin.register(() => this.dispose());
-    plugin.app.workspace.onLayoutReady(() => {
-      void this.ready.then(() => {
-        if (!this.disposed && this.preferences.autoShow && compareVersions(plugin.manifest.version, this.preferences.seenVersion) > 0) this.enqueue(true);
-      });
-    });
-  }
-  plugin;
-  entries;
-  language;
-  preferences = readPreferences(null);
-  path;
-  ready;
-  writeQueue = Promise.resolve();
-  disposed = false;
-  writable = true;
-  modal = null;
-  pendingAutomatic = false;
-  text(key) {
-    return updateText(this.language(), key);
-  }
-  addButton(parent) {
-    const button = parent.createEl("button", { text: this.text("view"), cls: "qiaomu-update-notes-link", attr: { type: "button" } });
-    const icon = button.createSpan({ attr: { "aria-hidden": "true" } });
-    setIcon(icon, "history");
-    button.prepend(icon);
-    button.addEventListener("click", () => this.show());
-  }
-  show() {
-    void this.ready.then(() => {
-      if (!this.disposed) this.enqueue(false);
-    });
-  }
-  async load() {
-    const adapter = this.plugin.app.vault.adapter;
-    try {
-      if (await adapter.exists(this.path)) this.preferences = readPreferences(JSON.parse(await adapter.read(this.path)));
-    } catch {
-      this.writable = false;
-      this.preferences = { seenVersion: this.plugin.manifest.version, autoShow: false };
-    }
-  }
-  save(patch) {
-    const task = this.writeQueue.catch(() => {
-    }).then(async () => {
-      if (this.disposed) return;
-      if (!this.writable) throw new Error("Update metadata is unreadable");
-      const next = { ...this.preferences, ...patch };
-      await this.plugin.app.vault.adapter.write(this.path, JSON.stringify(next));
-      this.preferences = next;
-    });
-    this.writeQueue = task;
-    return task;
-  }
-  enqueue(automatic) {
-    if (this.modal || this.disposed) return;
-    const queue = queueFor(this.plugin.app), id = this.plugin.manifest.id;
-    const existing = queue.jobs.find((job) => job.id === id);
-    if (existing) {
-      if (!automatic) {
-        this.pendingAutomatic = false;
-        existing.manual = true;
-      }
-      return;
-    }
-    this.pendingAutomatic = automatic;
-    queue.jobs.push({ id, manual: !automatic, run: () => this.open(queue) });
-    if (queue.timer === null) queue.timer = window.setInterval(() => queue.pump(), 300);
-  }
-  open(queue) {
-    if (this.disposed) {
-      queue.active = null;
-      queue.pump();
-      return;
-    }
-    const current = this.plugin.manifest.version;
-    const entries = unseenEntries(this.entries, this.pendingAutomatic ? this.preferences.seenVersion : "", current);
-    this.modal = new NotesModal(
-      this.plugin.app,
-      this.plugin.manifest.name,
-      current,
-      entries,
-      (key) => this.text(key),
-      this.preferences.autoShow,
-      async (enabled) => {
-        await this.save({ autoShow: enabled });
-      },
-      () => {
-        this.modal = null;
-        queue.active = null;
-      }
-    );
-    this.modal.open();
-    const seenVersion = compareVersions(current, this.preferences.seenVersion) > 0 ? current : this.preferences.seenVersion;
-    void this.save({ seenVersion }).catch(() => {
-      if (!this.disposed) new Notice(this.text("saveError"));
-    });
-  }
-  dispose() {
-    this.disposed = true;
-    const queue = queueFor(this.plugin.app);
-    queue.jobs = queue.jobs.filter((job) => job.id !== this.plugin.manifest.id);
-    this.modal?.close();
-    queue.pump();
-  }
-};
-var NotesModal = class extends Modal {
-  constructor(app, name, version, entries, text3, enabled, change, finished) {
-    super(app);
-    this.name = name;
-    this.version = version;
-    this.entries = entries;
-    this.text = text3;
-    this.enabled = enabled;
-    this.change = change;
-    this.finished = finished;
-  }
-  name;
-  version;
-  entries;
-  text;
-  enabled;
-  change;
-  finished;
-  onOpen() {
-    this.modalEl.addClass("qiaomu-update-notes");
-    this.modalEl.dir = this.text("done") === "\u062D\u0633\u0646\u064B\u0627" ? "rtl" : "ltr";
-    this.setTitle(`${this.name} \xB7 ${this.text("title")}`);
-    const content = this.contentEl;
-    content.createEl("p", { text: `v${this.version}`, cls: "qiaomu-update-notes-version" });
-    const entries = this.entries.length ? this.entries : [{ version: this.version, items: ["fallback"] }];
-    for (const entry of entries) {
-      const section = content.createEl("section", { cls: "qiaomu-update-notes-section" });
-      if (entries.length > 1) section.createEl("h3", { text: `v${entry.version}` });
-      const list = section.createEl("ul");
-      for (const item of entry.items) list.createEl("li", { text: this.text(item) });
-    }
-    const footer = content.createDiv({ cls: "qiaomu-update-notes-footer" });
-    const label2 = footer.createEl("label", { cls: "qiaomu-update-notes-option" });
-    const input = label2.createEl("input", { attr: { type: "checkbox" } });
-    input.checked = this.enabled;
-    label2.createSpan({ text: this.text("automatic") });
-    input.addEventListener("change", () => {
-      const desired = input.checked;
-      input.disabled = true;
-      void this.change(desired).then(() => {
-        this.enabled = desired;
-      }).catch(() => {
-        input.checked = this.enabled;
-        new Notice(this.text("saveError"));
-      }).finally(() => {
-        input.disabled = false;
-      });
-    });
-    const close = footer.createEl("button", { text: this.text("done"), cls: "qiaomu-update-notes-done", attr: { type: "button" } });
-    close.addEventListener("click", () => this.close());
-  }
-  onClose() {
-    this.contentEl.empty();
-    this.finished();
-  }
-};
-
-// src/client/home-release.ts
-init_original_globals();
-var UPDATE_ENTRIES = [
-  {
-    version: "0.4.0",
-    items: ["introduced", "revisit", "control", "smooth", "steady"]
-  }
-];
-
-// src/original/i18n.ts
-init_original_globals();
 
 // src/original/locales/de.json
 var de_default = {
@@ -46920,6 +46947,451 @@ function relativeTime(then, now2 = Date.now()) {
   return t("time.days", { n: Math.floor(hours / 24) });
 }
 
+// src/original/discovery.ts
+function defaultSites(sites) {
+  return sites.filter((site) => !site.off).map((site) => site.id);
+}
+function translateTarget2(text3) {
+  return /[\u3400-\u9fff]/.test(text3) ? "en" : "zh";
+}
+var DISCOVERY_MODULES = {
+  "multi-search": {
+    zh: "\u591A\u7AD9\u641C\u7D22",
+    en: "Search across sites",
+    icon: "search",
+    descriptionZh: "\u4E00\u6B21\u8F93\u5165\uFF0C\u5728\u9009\u5B9A\u7684\u7F51\u7AD9\u5206\u522B\u641C\u7D22\u3002",
+    descriptionEn: "Search selected websites with one query.",
+    sites: [
+      { id: "google", zh: "Google", en: "Google", icon: "globe", home: "https://www.google.com/", search: (q2) => `https://www.google.com/search?q=${encodeURIComponent(q2)}` },
+      { id: "bing", zh: "Bing", en: "Bing", icon: "globe", home: "https://www.bing.com/", search: (q2) => `https://www.bing.com/search?q=${encodeURIComponent(q2)}` },
+      { id: "duckduckgo", zh: "DuckDuckGo", en: "DuckDuckGo", icon: "globe", home: "https://duckduckgo.com/", search: (q2) => `https://duckduckgo.com/?q=${encodeURIComponent(q2)}` },
+      { id: "wikipedia", zh: "\u7EF4\u57FA\u767E\u79D1", en: "Wikipedia", icon: "book-open", home: "https://www.wikipedia.org/", search: (q2) => `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(q2)}` },
+      { id: "brave", zh: "Brave", en: "Brave", icon: "shield", home: "https://search.brave.com/", off: true, search: (q2) => `https://search.brave.com/search?q=${encodeURIComponent(q2)}` },
+      { id: "baidu", zh: "\u767E\u5EA6", en: "Baidu", icon: "globe", home: "https://www.baidu.com/", off: true, search: (q2) => `https://www.baidu.com/s?wd=${encodeURIComponent(q2)}` }
+    ]
+  },
+  "book-finder": {
+    zh: "\u627E\u7535\u5B50\u4E66",
+    en: "Find books",
+    icon: "book-open",
+    descriptionZh: "\u627E\u4E66\u76EE\u4E0E\u53EF\u5408\u6CD5\u9605\u8BFB\u3001\u4E0B\u8F7D\u7684\u516C\u7248\u4E66\u3002",
+    descriptionEn: "Find books and public-domain editions.",
+    sites: [
+      { id: "openlibrary", zh: "Open Library", en: "Open Library", icon: "library", home: "https://openlibrary.org/", search: (q2) => `https://openlibrary.org/search?q=${encodeURIComponent(q2)}` },
+      { id: "gutenberg", zh: "\u53E4\u817E\u5821\u8BA1\u5212", en: "Project Gutenberg", icon: "book-open", home: "https://www.gutenberg.org/", search: (q2) => `https://www.gutenberg.org/ebooks/?query=${encodeURIComponent(q2)}` },
+      { id: "douban-book", zh: "\u8C46\u74E3\u8BFB\u4E66", en: "Douban Books", icon: "book-marked", home: "https://book.douban.com/", search: (q2) => `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(q2)}` },
+      { id: "google-books", zh: "Google \u56FE\u4E66", en: "Google Books", icon: "book", home: "https://books.google.com/", search: (q2) => `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(q2)}` }
+    ]
+  },
+  "watch-finder": {
+    zh: "\u627E\u89C6\u9891\u4E0E\u7535\u5F71",
+    en: "Find video and film",
+    icon: "clapperboard",
+    descriptionZh: "\u641C\u7D22 YouTube \u89C6\u9891\u548C\u7535\u5F71\u8D44\u6599\uFF1B\u89C2\u770B\u4EA4\u7ED9\u6765\u6E90\u7F51\u7AD9\u3002",
+    descriptionEn: "Search YouTube and film catalogs; watch at the source.",
+    sites: [
+      { id: "youtube", zh: "YouTube", en: "YouTube", icon: "video", home: "https://www.youtube.com/", search: (q2) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q2)}` },
+      { id: "bilibili", zh: "\u54D4\u54E9\u54D4\u54E9", en: "Bilibili", icon: "video", home: "https://www.bilibili.com/", search: (q2) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(q2)}` },
+      { id: "imdb", zh: "IMDb", en: "IMDb", icon: "clapperboard", home: "https://www.imdb.com/", search: (q2) => `https://www.imdb.com/find/?q=${encodeURIComponent(q2)}` },
+      { id: "douban-movie", zh: "\u8C46\u74E3\u7535\u5F71", en: "Douban Movies", icon: "film", home: "https://movie.douban.com/", search: (q2) => `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(q2)}` },
+      { id: "justwatch", zh: "JustWatch \u89C2\u770B\u6E20\u9053", en: "JustWatch", icon: "tv", home: "https://www.justwatch.com/", search: (q2) => `https://www.justwatch.com/us/search?q=${encodeURIComponent(q2)}` }
+    ]
+  },
+  "music-finder": {
+    zh: "Spotify \u641C\u7D22",
+    en: "Search Spotify",
+    icon: "music",
+    descriptionZh: "\u627E\u6B4C\u66F2\u548C\u64AD\u5BA2\uFF0C\u4EA4\u7ED9 Spotify \u64AD\u653E\u3002",
+    descriptionEn: "Find music and podcasts, then play them in Spotify.",
+    sites: [
+      { id: "spotify", zh: "Spotify", en: "Spotify", icon: "music", home: "https://open.spotify.com/", search: (q2) => `https://open.spotify.com/search/${encodeURIComponent(q2)}` }
+    ]
+  },
+  "ai-learning": {
+    zh: "\u5B66 AI",
+    en: "Learn AI",
+    icon: "graduation-cap",
+    descriptionZh: "\u6253\u5F00\u53EF\u4FE1\u7684 AI \u5B66\u4E60\u8D44\u6599\uFF0C\u8FDB\u5EA6\u4FDD\u7559\u5728\u539F\u7F51\u7AD9\u3002",
+    descriptionEn: "Open trusted AI lessons; progress stays at the source.",
+    sites: [
+      { id: "openai-academy", zh: "OpenAI Academy", en: "OpenAI Academy", icon: "graduation-cap", home: "https://academy.openai.com/" },
+      { id: "hf-learn", zh: "Hugging Face Learn", en: "Hugging Face Learn", icon: "book-open", home: "https://huggingface.co/learn" },
+      { id: "deeplearning-ai", zh: "DeepLearning.AI \u77ED\u8BFE", en: "DeepLearning.AI short courses", icon: "graduation-cap", home: "https://www.deeplearning.ai/short-courses/" },
+      { id: "fast-ai", zh: "fast.ai \u5B9E\u6218\u8BFE", en: "fast.ai course", icon: "book-open", home: "https://course.fast.ai/" }
+    ]
+  },
+  "paper-finder": {
+    zh: "\u627E\u8BBA\u6587",
+    en: "Find papers",
+    icon: "file-search",
+    descriptionZh: "\u7528\u6807\u9898\u6216\u5173\u952E\u8BCD\u68C0\u7D22\u8BBA\u6587\uFF0C\u9605\u8BFB\u7559\u5728\u6765\u6E90\u7F51\u7AD9\u3002",
+    descriptionEn: "Find research papers by title or keyword.",
+    sites: [
+      { id: "arxiv", zh: "arXiv", en: "arXiv", icon: "file-text", home: "https://arxiv.org/", search: (q2) => `https://arxiv.org/search/?query=${encodeURIComponent(q2)}&searchtype=all` },
+      { id: "crossref", zh: "Crossref", en: "Crossref", icon: "book-open", home: "https://search.crossref.org/", search: (q2) => `https://search.crossref.org/?q=${encodeURIComponent(q2)}` },
+      { id: "semantic-scholar", zh: "Semantic Scholar", en: "Semantic Scholar", icon: "sparkles", home: "https://www.semanticscholar.org/", search: (q2) => `https://www.semanticscholar.org/search?q=${encodeURIComponent(q2)}` },
+      { id: "google-scholar", zh: "Google \u5B66\u672F", en: "Google Scholar", icon: "graduation-cap", home: "https://scholar.google.com/", search: (q2) => `https://scholar.google.com/scholar?q=${encodeURIComponent(q2)}` }
+    ]
+  },
+  "word-finder": {
+    zh: "\u67E5\u8BCD",
+    en: "Look up a word",
+    icon: "book-a",
+    descriptionZh: "\u4E00\u8BCD\u67E5\u8BE2\u591A\u4E2A\u8BCD\u5178\uFF0C\u7ED3\u679C\u5728\u6765\u6E90\u7F51\u7AD9\u67E5\u770B\u3002",
+    descriptionEn: "Look up a word in trusted dictionaries.",
+    sites: [
+      { id: "cambridge", zh: "\u5251\u6865\u8BCD\u5178", en: "Cambridge Dictionary", icon: "book-open", home: "https://dictionary.cambridge.org/", search: (q2) => `https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(q2)}` },
+      { id: "wiktionary", zh: "\u7EF4\u57FA\u8BCD\u5178", en: "Wiktionary", icon: "book-open", home: "https://en.wiktionary.org/", search: (q2) => `https://en.wiktionary.org/w/index.php?search=${encodeURIComponent(q2)}` },
+      { id: "youdao", zh: "\u6709\u9053\u8BCD\u5178", en: "Youdao", icon: "languages", home: "https://dict.youdao.com/", search: (q2) => `https://dict.youdao.com/result?word=${encodeURIComponent(q2)}&lang=en` },
+      { id: "merriam-webster", zh: "\u97E6\u6C0F\u8BCD\u5178", en: "Merriam-Webster", icon: "book-a", home: "https://www.merriam-webster.com/", search: (q2) => `https://www.merriam-webster.com/dictionary/${encodeURIComponent(q2)}` }
+    ]
+  },
+  "translate": {
+    zh: "\u7FFB\u8BD1",
+    en: "Translate",
+    icon: "languages",
+    descriptionZh: "\u4E2D\u6587\u8BD1\u6210\u82F1\u6587\uFF0C\u5176\u4ED6\u8BED\u8A00\u8BD1\u6210\u4E2D\u6587\uFF0C\u5728\u7FFB\u8BD1\u7F51\u7AD9\u67E5\u770B\u7ED3\u679C\u3002",
+    descriptionEn: "Chinese to English, anything else to Chinese, at a translation site.",
+    sites: [
+      { id: "google-translate", zh: "Google \u7FFB\u8BD1", en: "Google Translate", icon: "languages", home: "https://translate.google.com/", search: (q2) => `https://translate.google.com/?sl=auto&tl=${translateTarget2(q2) === "zh" ? "zh-CN" : "en"}&text=${encodeURIComponent(q2)}&op=translate` },
+      { id: "deepl", zh: "DeepL", en: "DeepL", icon: "languages", home: "https://www.deepl.com/translator", search: (q2) => `https://www.deepl.com/translator#auto/${translateTarget2(q2)}/${encodeURIComponent(q2).replace(/%2F/gi, "%5C%2F")}` },
+      { id: "bing-translate", zh: "\u5FC5\u5E94\u7FFB\u8BD1", en: "Bing Translator", icon: "languages", home: "https://www.bing.com/translator", search: (q2) => `https://www.bing.com/translator?from=auto-detect&to=${translateTarget2(q2) === "zh" ? "zh-Hans" : "en"}&text=${encodeURIComponent(q2)}` }
+    ]
+  },
+  "dev-inbox": {
+    zh: "GitHub \u5F85\u529E",
+    en: "GitHub inbox",
+    icon: "git-pull-request",
+    descriptionZh: "\u6253\u5F00\u5F85\u4F60\u5BA1\u9605\u7684 PR\u3001\u5206\u914D\u7ED9\u4F60\u7684 Issue \u548C\u901A\u77E5\uFF1B\u767B\u5F55\u72B6\u6001\u7559\u5728\u6D4F\u89C8\u5668\u3002",
+    descriptionEn: "Open review requests, assigned issues and notifications; sign-in stays in your browser.",
+    sites: [
+      { id: "github-search", zh: "\u641C\u7D22\u4ED3\u5E93", en: "Search repositories", icon: "search", home: "https://github.com/search", search: (q2) => `https://github.com/search?q=${encodeURIComponent(q2)}&type=repositories` },
+      { id: "github-reviews", zh: "\u5F85\u6211\u5BA1\u9605", en: "Review requests", icon: "git-pull-request", home: "https://github.com/pulls/review-requested" },
+      { id: "github-pulls", zh: "\u6211\u7684 PR", en: "My pull requests", icon: "git-merge", home: "https://github.com/pulls" },
+      { id: "github-issues", zh: "\u5206\u914D\u7ED9\u6211", en: "Assigned issues", icon: "circle-dot", home: "https://github.com/issues/assigned" },
+      { id: "github-notifications", zh: "\u901A\u77E5", en: "Notifications", icon: "bell", home: "https://github.com/notifications" }
+    ]
+  }
+};
+function discoveryUrl(site, query) {
+  return query.trim() && site.search ? site.search(query.trim().slice(0, 300)) : site.home;
+}
+function parseSearchTemplates2(input) {
+  return input.split(/\r?\n/).filter((line) => line.trim()).slice(0, 8).map((line, index) => {
+    const separator = line.indexOf("|");
+    const name = line.slice(0, separator).trim(), url = line.slice(separator + 1).trim();
+    if (separator < 1 || !name || !url.includes("{query}")) throw new Error(L("\u7B2C {line} \u884C\u9700\u8981\uFF1A\u540D\u79F0 | https://example.com/?q={query}", "Line {line} needs: Name | https://example.com/?q={query}", { line: index + 1 }));
+    const parsed = new URL(url.replaceAll("{query}", "test"));
+    if (parsed.origin !== new URL(url.replaceAll("{query}", "other")).origin) throw new Error(L("\u7B2C {line} \u884C\u7684 {query} \u53EA\u80FD\u653E\u5728\u8DEF\u5F84\u6216\u67E5\u8BE2\u53C2\u6570\u4E2D", "Line {line}: {query} can only appear in the path or query string", { line: index + 1 }));
+    if (!["https:", "http:"].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error(L("\u7B2C {line} \u884C\u7684\u7F51\u5740\u65E0\u6548", "Line {line}: invalid URL", { line: index + 1 }));
+    return { name: name.slice(0, 60), url };
+  });
+}
+function customSearchSites(templates) {
+  return templates.map((template) => ({ id: `custom:${template.url}`, zh: template.name, en: template.name, icon: "globe", home: new URL(template.url.replaceAll("{query}", "")).origin, search: (query) => template.url.replaceAll("{query}", encodeURIComponent(query)) }));
+}
+
+// src/client/legacy-preferences.ts
+var SEARCH_MODULES = {
+  web: "multi-search",
+  books: "book-finder",
+  video: "watch-finder",
+  music: "music-finder",
+  ai: "ai-learning",
+  papers: "paper-finder",
+  words: "word-finder",
+  translate: "translate",
+  dev: "dev-inbox"
+};
+function includeLegacySearchSites() {
+  for (const group of SEARCH_GROUPS) {
+    const catalog = DISCOVERY_MODULES[SEARCH_MODULES[group.id]];
+    if (!catalog) continue;
+    const known = new Set(catalog.sites.map((site) => site.id));
+    for (const site of group.sites)
+      if (!known.has(site.id)) catalog.sites.push({ ...site, icon: "globe" });
+  }
+}
+function legacySearchOptions(state) {
+  const parsed = parseSearchTemplates(state.searchTemplates || "");
+  const custom = parsed.ok ? parsed.sites : [];
+  const options = {};
+  for (const group of SEARCH_GROUPS) {
+    const sites = groupSites(group.id, custom), ids = new Set(sites.map((site) => site.id));
+    const saved = state.searchEnginesByGroup?.[group.id];
+    const selected = Array.isArray(saved) ? saved.filter((id) => ids.has(id)) : [];
+    const legacy = group.id === "web" ? (state.searchEngines || []).filter((id) => ids.has(id)) : [];
+    options[SEARCH_MODULES[group.id]] = {
+      sites: selected.length ? selected : legacy.length ? legacy : defaultSiteIds(group.id, custom),
+      ...group.id === "web" ? {
+        customSites: custom.map((site) => ({
+          name: site.zh,
+          url: site.id.slice("custom:".length)
+        }))
+      } : {}
+    };
+  }
+  return options;
+}
+function legacyWallpaper(state, date = dayKey()) {
+  if (state.wallpaperMode !== "daily") return null;
+  const photos = curatedPhotos();
+  const offset = Number.isFinite(state.wallpaperShift) ? Math.trunc(state.wallpaperShift) : 0;
+  return {
+    current: photos[dailyIndex(date, photos.length, offset)],
+    chosenOn: date
+  };
+}
+
+// src/original/main.ts
+init_original_globals();
+
+// src/original/update-notes.ts
+init_original_globals();
+
+// src/original/update-notes-i18n.ts
+init_original_globals();
+var messages = {
+  title: ["\u66F4\u65B0\u5185\u5BB9", "What\u2019s new", "\u66F4\u65B0\u5167\u5BB9", "\u65B0\u7740\u60C5\u5831", "\uC5C5\uB370\uC774\uD2B8 \uB0B4\uC6A9", "Novedades", "Nouveaut\xE9s", "Neuerungen", "Novidades", "\u0427\u0442\u043E \u043D\u043E\u0432\u043E\u0433\u043E", "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F"],
+  view: ["\u67E5\u770B\u66F4\u65B0\u5185\u5BB9", "View what\u2019s new", "\u67E5\u770B\u66F4\u65B0\u5167\u5BB9", "\u66F4\u65B0\u5185\u5BB9\u3092\u898B\u308B", "\uC5C5\uB370\uC774\uD2B8 \uB0B4\uC6A9 \uBCF4\uAE30", "Ver novedades", "Voir les nouveaut\xE9s", "Neuerungen ansehen", "Ver novidades", "\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F", "\u0639\u0631\u0636 \u0627\u0644\u0645\u0633\u062A\u062C\u062F\u0627\u062A"],
+  done: ["\u77E5\u9053\u4E86", "Got it", "\u77E5\u9053\u4E86", "\u78BA\u8A8D", "\uD655\uC778", "Entendido", "Compris", "Verstanden", "Entendi", "\u041F\u043E\u043D\u044F\u0442\u043D\u043E", "\u062D\u0633\u0646\u064B\u0627"],
+  automatic: ["\u66F4\u65B0\u540E\u81EA\u52A8\u663E\u793A", "Show after updates", "\u66F4\u65B0\u5F8C\u81EA\u52D5\u986F\u793A", "\u66F4\u65B0\u5F8C\u306B\u81EA\u52D5\u8868\u793A", "\uC5C5\uB370\uC774\uD2B8 \uD6C4 \uC790\uB3D9 \uD45C\uC2DC", "Mostrar tras actualizar", "Afficher apr\xE8s les mises \xE0 jour", "Nach Updates anzeigen", "Mostrar ap\xF3s atualizar", "\u041F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043F\u043E\u0441\u043B\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0439", "\u0627\u0644\u0639\u0631\u0636 \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u062F\u064A\u062B\u0627\u062A"],
+  saveError: ["\u66F4\u65B0\u63D0\u793A\u7684\u504F\u597D\u672A\u80FD\u4FDD\u5B58\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002", "Could not save update preferences. Please try again.", "\u7121\u6CD5\u5132\u5B58\u66F4\u65B0\u63D0\u793A\u504F\u597D\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66\u3002", "\u66F4\u65B0\u901A\u77E5\u306E\u8A2D\u5B9A\u3092\u4FDD\u5B58\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002", "\uC5C5\uB370\uC774\uD2B8 \uC54C\uB9BC \uC124\uC815\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.", "No se pudieron guardar las preferencias. Int\xE9ntalo de nuevo.", "Impossible d\u2019enregistrer les pr\xE9f\xE9rences. R\xE9essayez.", "Update-Einstellungen konnten nicht gespeichert werden. Bitte erneut versuchen.", "N\xE3o foi poss\xEDvel salvar as prefer\xEAncias. Tente novamente.", "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437.", "\u062A\u0639\u0630\u0631 \u062D\u0641\u0638 \u062A\u0641\u0636\u064A\u0644\u0627\u062A \u0627\u0644\u062A\u062D\u062F\u064A\u062B. \u064A\u064F\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u064B\u0627."],
+  smooth: ["\u4E3B\u9875\u6EDA\u52A8\u66F4\u6D41\u7545\uFF1A\u5373\u4F7F\u5173\u95ED\u4E86\u786C\u4EF6\u52A0\u901F\uFF0C\u6BDB\u73BB\u7483\u5361\u7247\u4E5F\u80FD\u6EE1\u5E27\u6EDA\u52A8\uFF0C\u5916\u89C2\u4E0D\u53D8\u3002", "Home scrolls smoothly even with hardware acceleration off; the frosted cards look the same.", "\u9996\u9801\u6372\u52D5\u66F4\u6D41\u66A2\uFF1A\u5373\u4F7F\u95DC\u9589\u786C\u9AD4\u52A0\u901F\uFF0C\u6BDB\u73BB\u7483\u5361\u7247\u4E5F\u80FD\u6EFF\u5E40\u6372\u52D5\uFF0C\u5916\u89C0\u4E0D\u8B8A\u3002", "\u30CF\u30FC\u30C9\u30A6\u30A7\u30A2\u30A2\u30AF\u30BB\u30E9\u30EC\u30FC\u30B7\u30E7\u30F3\u304C\u30AA\u30D5\u3067\u3082\u30DB\u30FC\u30E0\u304C\u306A\u3081\u3089\u304B\u306B\u30B9\u30AF\u30ED\u30FC\u30EB\u3057\u307E\u3059\u3002\u898B\u305F\u76EE\u306F\u5909\u308F\u308A\u307E\u305B\u3093\u3002", "\uD558\uB4DC\uC6E8\uC5B4 \uAC00\uC18D\uC744 \uAEBC\uB3C4 \uD648\uC774 \uBD80\uB4DC\uB7FD\uAC8C \uC2A4\uD06C\uB864\uB429\uB2C8\uB2E4. \uD654\uBA74 \uBAA8\uC591\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4.", "Inicio se desplaza con fluidez incluso sin aceleraci\xF3n por hardware, con el mismo aspecto.", "L\u2019accueil d\xE9file en douceur m\xEAme sans acc\xE9l\xE9ration mat\xE9rielle, avec le m\xEAme rendu.", "Die Startseite scrollt auch ohne Hardwarebeschleunigung fl\xFCssig \u2013 bei gleichem Aussehen.", "A p\xE1gina inicial rola com fluidez mesmo sem acelera\xE7\xE3o de hardware, com a mesma apar\xEAncia.", "\u0413\u043B\u0430\u0432\u043D\u0430\u044F \u043F\u0440\u043E\u043A\u0440\u0443\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u043F\u043B\u0430\u0432\u043D\u043E \u0434\u0430\u0436\u0435 \u0431\u0435\u0437 \u0430\u043F\u043F\u0430\u0440\u0430\u0442\u043D\u043E\u0433\u043E \u0443\u0441\u043A\u043E\u0440\u0435\u043D\u0438\u044F; \u0432\u043D\u0435\u0448\u043D\u0438\u0439 \u0432\u0438\u0434 \u043F\u0440\u0435\u0436\u043D\u0438\u0439.", "\u062A\u062A\u0645\u0631\u0631 \u0627\u0644\u0635\u0641\u062D\u0629 \u0627\u0644\u0631\u0626\u064A\u0633\u064A\u0629 \u0628\u0633\u0644\u0627\u0633\u0629 \u062D\u062A\u0649 \u0645\u0639 \u0625\u064A\u0642\u0627\u0641 \u062A\u0633\u0631\u064A\u0639 \u0627\u0644\u0623\u062C\u0647\u0632\u0629\u060C \u0628\u0627\u0644\u0645\u0638\u0647\u0631 \u0646\u0641\u0633\u0647."],
+  steady: ["\u5237\u65B0\u3001\u5207\u6362\u6807\u7B7E\u548C\u641C\u7D22\u8F93\u5165\u4E0D\u518D\u95EA\u70C1\u6216\u5361\u987F\u3002", "Refreshing, switching tabs and typing in search no longer flicker or stutter.", "\u91CD\u65B0\u6574\u7406\u3001\u5207\u63DB\u5206\u9801\u548C\u641C\u5C0B\u8F38\u5165\u4E0D\u518D\u9583\u720D\u6216\u5361\u9813\u3002", "\u66F4\u65B0\u3001\u30BF\u30D6\u306E\u5207\u308A\u66FF\u3048\u3001\u691C\u7D22\u5165\u529B\u3067\u3061\u3089\u3064\u304D\u3084\u5F15\u3063\u304B\u304B\u308A\u304C\u306A\u304F\u306A\u308A\u307E\u3057\u305F\u3002", "\uC0C8\uB85C \uACE0\uCE68, \uD0ED \uC804\uD658, \uAC80\uC0C9 \uC785\uB825 \uC2DC \uAE5C\uBE61\uC784\uACFC \uB04A\uAE40\uC774 \uC0AC\uB77C\uC84C\uC2B5\uB2C8\uB2E4.", "Actualizar, cambiar de pesta\xF1a y escribir en la b\xFAsqueda ya no parpadea ni se traba.", "Actualiser, changer d\u2019onglet et saisir une recherche ne clignotent plus et ne saccadent plus.", "Aktualisieren, Tabwechsel und Tippen in der Suche flackern und ruckeln nicht mehr.", "Atualizar, trocar de aba e digitar na busca n\xE3o piscam nem travam mais.", "\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435, \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u0430\u0434\u043E\u043A \u0438 \u0432\u0432\u043E\u0434 \u0432 \u043F\u043E\u0438\u0441\u043A\u0435 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043C\u0435\u0440\u0446\u0430\u044E\u0442 \u0438 \u043D\u0435 \u043F\u043E\u0434\u0442\u043E\u0440\u043C\u0430\u0436\u0438\u0432\u0430\u044E\u0442.", "\u0644\u0645 \u064A\u0639\u062F \u0627\u0644\u062A\u062D\u062F\u064A\u062B \u0648\u062A\u0628\u062F\u064A\u0644 \u0639\u0644\u0627\u0645\u0627\u062A \u0627\u0644\u062A\u0628\u0648\u064A\u0628 \u0648\u0627\u0644\u0643\u062A\u0627\u0628\u0629 \u0641\u064A \u0627\u0644\u0628\u062D\u062B \u064A\u0648\u0645\u0636 \u0623\u0648 \u064A\u062A\u0642\u0637\u0639."],
+  introduced: ["\u65B0\u589E\u66F4\u65B0\u63D0\u793A\uFF1A\u5347\u7EA7\u540E\u5373\u53EF\u770B\u5230\u672C\u6B21\u53D8\u5316\uFF0C\u540C\u4E00\u7248\u672C\u53EA\u81EA\u52A8\u663E\u793A\u4E00\u6B21\u3002", "New update notes show what changed after an upgrade, once per version.", "\u65B0\u589E\u66F4\u65B0\u63D0\u793A\uFF1A\u5347\u7D1A\u5F8C\u5373\u53EF\u67E5\u770B\u672C\u6B21\u8B8A\u5316\uFF0C\u540C\u4E00\u7248\u672C\u53EA\u81EA\u52D5\u986F\u793A\u4E00\u6B21\u3002", "\u66F4\u65B0\u5F8C\u306B\u5909\u66F4\u70B9\u3092\u8868\u793A\u3059\u308B\u3088\u3046\u306B\u306A\u308A\u307E\u3057\u305F\u3002\u81EA\u52D5\u8868\u793A\u306F\u5404\u30D0\u30FC\u30B8\u30E7\u30F3\u306B\u3064\u304D\u4E00\u5EA6\u3060\u3051\u3067\u3059\u3002", "\uC5C5\uB370\uC774\uD2B8 \uD6C4 \uBCC0\uACBD \uC0AC\uD56D\uC744 \uBC84\uC804\uB9C8\uB2E4 \uD55C \uBC88\uC529 \uC54C\uB824 \uB4DC\uB9BD\uB2C8\uB2E4.", "Las novedades aparecen una sola vez por versi\xF3n despu\xE9s de actualizar.", "Les nouveaut\xE9s s\u2019affichent une seule fois par version apr\xE8s une mise \xE0 jour.", "Nach einem Update werden die Neuerungen einmal pro Version angezeigt.", "As novidades aparecem uma vez por vers\xE3o ap\xF3s uma atualiza\xE7\xE3o.", "\u041F\u043E\u0441\u043B\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u043E\u0434\u0438\u043D \u0440\u0430\u0437 \u0434\u043B\u044F \u043A\u0430\u0436\u0434\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438.", "\u062A\u064F\u0639\u0631\u0636 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u062F\u064A\u062B \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0644\u0643\u0644 \u0625\u0635\u062F\u0627\u0631."],
+  revisit: ["\u60F3\u518D\u770B\u4E00\u6B21\uFF1F\u5728\u300C\u5173\u4E8E\u300D\u4E2D\u70B9\u51FB\u300C\u67E5\u770B\u66F4\u65B0\u5185\u5BB9\u300D\uFF0C\u4E5F\u53EF\u4ECE\u547D\u4EE4\u9762\u677F\u6253\u5F00\u3002", "Reopen these notes from About or the command palette at any time.", "\u60F3\u518D\u770B\u4E00\u6B21\uFF1F\u53EF\u5F9E\u300C\u95DC\u65BC\u300D\u6216\u547D\u4EE4\u9762\u677F\u91CD\u65B0\u958B\u555F\u66F4\u65B0\u5167\u5BB9\u3002", "\u3053\u306E\u5185\u5BB9\u306F\u300C\u3053\u306E\u30D7\u30E9\u30B0\u30A4\u30F3\u306B\u3064\u3044\u3066\u300D\u3084\u30B3\u30DE\u30F3\u30C9\u30D1\u30EC\u30C3\u30C8\u304B\u3089\u3044\u3064\u3067\u3082\u78BA\u8A8D\u3067\u304D\u307E\u3059\u3002", "\uC815\uBCF4 \uC124\uC815\uC774\uB098 \uBA85\uB839 \uD314\uB808\uD2B8\uC5D0\uC11C \uC5B8\uC81C\uB4E0 \uB2E4\uC2DC \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "Puedes volver a ver las novedades desde Acerca de o la paleta de comandos.", "Retrouvez ces notes dans \xC0 propos ou dans la palette de commandes.", "Diese Hinweise lassen sich jederzeit unter Info oder \xFCber die Befehlspalette \xF6ffnen.", "Reabra estas notas em Sobre ou na paleta de comandos quando quiser.", "\u042D\u0442\u0438 \u0437\u0430\u043C\u0435\u0442\u043A\u0438 \u043C\u043E\u0436\u043D\u043E \u0441\u043D\u043E\u0432\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0432 \u0440\u0430\u0437\u0434\u0435\u043B\u0435 \xAB\u041E \u043F\u043B\u0430\u0433\u0438\u043D\u0435\xBB \u0438\u043B\u0438 \u0447\u0435\u0440\u0435\u0437 \u043F\u0430\u043B\u0438\u0442\u0440\u0443 \u043A\u043E\u043C\u0430\u043D\u0434.", "\u064A\u0645\u0643\u0646 \u0641\u062A\u062D \u0647\u0630\u0647 \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u062C\u062F\u062F\u064B\u0627 \u0645\u0646 \u0642\u0633\u0645 \xAB\u062D\u0648\u0644\xBB \u0623\u0648 \u0644\u0648\u062D\u0629 \u0627\u0644\u0623\u0648\u0627\u0645\u0631."],
+  control: ["\u4E0B\u65B9\u53EF\u5173\u95ED\u81EA\u52A8\u63D0\u793A\uFF1B\u66F4\u65B0\u5185\u5BB9\u4FDD\u5B58\u5728\u63D2\u4EF6\u5185\uFF0C\u79BB\u7EBF\u4E5F\u80FD\u67E5\u770B\u3002", "Turn off automatic notes below if you prefer. Notes are bundled and work offline.", "\u53EF\u5728\u4E0B\u65B9\u95DC\u9589\u81EA\u52D5\u63D0\u793A\uFF1B\u66F4\u65B0\u5167\u5BB9\u96A8\u63D2\u4EF6\u63D0\u4F9B\uFF0C\u96E2\u7DDA\u4E5F\u80FD\u67E5\u770B\u3002", "\u4E0B\u306E\u8A2D\u5B9A\u3067\u81EA\u52D5\u8868\u793A\u3092\u30AA\u30D5\u306B\u3067\u304D\u307E\u3059\u3002\u66F4\u65B0\u5185\u5BB9\u306F\u30AA\u30D5\u30E9\u30A4\u30F3\u3067\u3082\u8AAD\u3081\u307E\u3059\u3002", "\uC544\uB798\uC5D0\uC11C \uC790\uB3D9 \uD45C\uC2DC\uB97C \uB04C \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC624\uD504\uB77C\uC778\uC5D0\uC11C\uB3C4 \uB0B4\uC6A9\uC744 \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "Puedes desactivar el aviso autom\xE1tico abajo. Las notas tambi\xE9n funcionan sin conexi\xF3n.", "D\xE9sactivez l\u2019affichage automatique ci-dessous si vous le souhaitez. Lecture hors ligne disponible.", "Die automatische Anzeige kann unten deaktiviert werden. Die Hinweise sind auch offline verf\xFCgbar.", "Desative a exibi\xE7\xE3o autom\xE1tica abaixo, se preferir. As notas funcionam offline.", "\u0410\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u043F\u043E\u043A\u0430\u0437 \u043C\u043E\u0436\u043D\u043E \u043E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043D\u0438\u0436\u0435. \u0417\u0430\u043C\u0435\u0442\u043A\u0438 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B \u0438 \u0431\u0435\u0437 \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u0430.", "\u064A\u0645\u0643\u0646 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u0639\u0631\u0636 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A \u0623\u062F\u0646\u0627\u0647. \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A \u0645\u062A\u0627\u062D\u0629 \u062F\u0648\u0646 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A."],
+  fallback: ["\u5DF2\u5B89\u88C5\u65B0\u7248\u672C\u3002\u5B8C\u6574\u66F4\u65B0\u8BF4\u660E\u53EF\u5728\u63D2\u4EF6\u7684 GitHub Releases \u4E2D\u67E5\u770B\u3002", "A new version is installed. Full release notes are available on the plugin\u2019s GitHub Releases page.", "\u5DF2\u5B89\u88DD\u65B0\u7248\u672C\u3002\u5B8C\u6574\u66F4\u65B0\u8AAA\u660E\u53EF\u5728\u63D2\u4EF6\u7684 GitHub Releases \u67E5\u770B\u3002", "\u65B0\u3057\u3044\u30D0\u30FC\u30B8\u30E7\u30F3\u3092\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u3057\u307E\u3057\u305F\u3002\u8A73\u3057\u3044\u5185\u5BB9\u306F\u30D7\u30E9\u30B0\u30A4\u30F3\u306E GitHub Releases \u3092\u3054\u89A7\u304F\u3060\u3055\u3044\u3002", "\uC0C8 \uBC84\uC804\uC774 \uC124\uCE58\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uC790\uC138\uD55C \uB0B4\uC6A9\uC740 \uD50C\uB7EC\uADF8\uC778\uC758 GitHub Releases\uC5D0\uC11C \uD655\uC778\uD558\uC138\uC694.", "Se instal\xF3 una nueva versi\xF3n. Consulta los detalles en GitHub Releases del complemento.", "Une nouvelle version est install\xE9e. Consultez les d\xE9tails sur GitHub Releases du plugin.", "Eine neue Version ist installiert. Details stehen auf der GitHub-Releases-Seite des Plugins.", "Uma nova vers\xE3o foi instalada. Veja os detalhes no GitHub Releases do plugin.", "\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430 \u043D\u043E\u0432\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F. \u041F\u043E\u043B\u043D\u043E\u0435 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E \u0432 GitHub Releases \u043F\u043B\u0430\u0433\u0438\u043D\u0430.", "\u062A\u0645 \u062A\u062B\u0628\u064A\u062A \u0625\u0635\u062F\u0627\u0631 \u062C\u062F\u064A\u062F. \u062A\u062A\u0648\u0641\u0631 \u0627\u0644\u062A\u0641\u0627\u0635\u064A\u0644 \u0641\u064A \u0635\u0641\u062D\u0629 \u0625\u0635\u062F\u0627\u0631\u0627\u062A \u0627\u0644\u0645\u0644\u062D\u0642 \u0639\u0644\u0649 GitHub."]
+};
+var UPDATE_LOCALES = ["zh", "en", "zh-TW", "ja", "ko", "es", "fr", "de", "pt", "ru", "ar"];
+function updateText(language, key) {
+  const code = String(language || "en").toLowerCase();
+  const locale = /^zh.*(tw|hk|mo|hant)/.test(code) ? "zh-TW" : code.split(/[-_]/)[0];
+  const index = UPDATE_LOCALES.findIndex((value) => value === locale);
+  return messages[key][index < 0 ? 1 : index] || messages[key][1];
+}
+
+// src/original/update-notes.ts
+var queueKey = /* @__PURE__ */ Symbol.for("qiaomu.update-notes.queue.v1");
+function compareVersions(a, b2) {
+  const left = a.split(".").map(Number), right = b2.split(".").map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff) return Math.sign(diff);
+  }
+  return 0;
+}
+function readPreferences(raw) {
+  const value = raw && typeof raw === "object" ? raw : {};
+  return { seenVersion: typeof value.seenVersion === "string" && /^\d+\.\d+\.\d+$/.test(value.seenVersion) ? value.seenVersion : "", autoShow: value.autoShow !== false };
+}
+function unseenEntries(entries, seen, current) {
+  return entries.filter((entry) => compareVersions(entry.version, current) <= 0 && (!seen || compareVersions(entry.version, seen) > 0)).sort((a, b2) => compareVersions(b2.version, a.version));
+}
+function queueFor(app) {
+  const owner = app;
+  if (owner[queueKey]) return owner[queueKey];
+  const queue = { jobs: [], active: null, timer: null, pump: () => {
+  } };
+  queue.pump = () => {
+    if (!queue.jobs.length) {
+      if (queue.timer !== null) window.clearInterval(queue.timer);
+      queue.timer = null;
+      return;
+    }
+    if (queue.active) return;
+    const index = document.querySelector(".modal-container") ? queue.jobs.findIndex((job2) => job2.manual) : 0;
+    if (index < 0) return;
+    const job = queue.jobs.splice(index, 1)[0];
+    if (job) {
+      queue.active = job.id;
+      job.run();
+    }
+  };
+  owner[queueKey] = queue;
+  return queue;
+}
+var UpdateNotes = class {
+  constructor(plugin, entries, language = getLanguage) {
+    this.plugin = plugin;
+    this.entries = entries;
+    this.language = language;
+    this.path = normalizePath(`${plugin.app.vault.configDir}/plugins/${plugin.manifest.id}/update-notes.json`);
+    this.ready = this.load();
+    plugin.addCommand({ id: "view-update-notes", name: this.text("view"), callback: () => this.show() });
+    plugin.register(() => this.dispose());
+    plugin.app.workspace.onLayoutReady(() => {
+      void this.ready.then(() => {
+        if (!this.disposed && this.preferences.autoShow && compareVersions(plugin.manifest.version, this.preferences.seenVersion) > 0) this.enqueue(true);
+      });
+    });
+  }
+  plugin;
+  entries;
+  language;
+  preferences = readPreferences(null);
+  path;
+  ready;
+  writeQueue = Promise.resolve();
+  disposed = false;
+  writable = true;
+  modal = null;
+  pendingAutomatic = false;
+  text(key) {
+    return updateText(this.language(), key);
+  }
+  addButton(parent) {
+    const button = parent.createEl("button", { text: this.text("view"), cls: "qiaomu-update-notes-link", attr: { type: "button" } });
+    const icon = button.createSpan({ attr: { "aria-hidden": "true" } });
+    setIcon(icon, "history");
+    button.prepend(icon);
+    button.addEventListener("click", () => this.show());
+  }
+  show() {
+    void this.ready.then(() => {
+      if (!this.disposed) this.enqueue(false);
+    });
+  }
+  async load() {
+    const adapter = this.plugin.app.vault.adapter;
+    try {
+      if (await adapter.exists(this.path)) this.preferences = readPreferences(JSON.parse(await adapter.read(this.path)));
+    } catch {
+      this.writable = false;
+      this.preferences = { seenVersion: this.plugin.manifest.version, autoShow: false };
+    }
+  }
+  save(patch) {
+    const task = this.writeQueue.catch(() => {
+    }).then(async () => {
+      if (this.disposed) return;
+      if (!this.writable) throw new Error("Update metadata is unreadable");
+      const next = { ...this.preferences, ...patch };
+      await this.plugin.app.vault.adapter.write(this.path, JSON.stringify(next));
+      this.preferences = next;
+    });
+    this.writeQueue = task;
+    return task;
+  }
+  enqueue(automatic) {
+    if (this.modal || this.disposed) return;
+    const queue = queueFor(this.plugin.app), id = this.plugin.manifest.id;
+    const existing = queue.jobs.find((job) => job.id === id);
+    if (existing) {
+      if (!automatic) {
+        this.pendingAutomatic = false;
+        existing.manual = true;
+      }
+      return;
+    }
+    this.pendingAutomatic = automatic;
+    queue.jobs.push({ id, manual: !automatic, run: () => this.open(queue) });
+    if (queue.timer === null) queue.timer = window.setInterval(() => queue.pump(), 300);
+  }
+  open(queue) {
+    if (this.disposed) {
+      queue.active = null;
+      queue.pump();
+      return;
+    }
+    const current = this.plugin.manifest.version;
+    const entries = unseenEntries(this.entries, this.pendingAutomatic ? this.preferences.seenVersion : "", current);
+    this.modal = new NotesModal(
+      this.plugin.app,
+      this.plugin.manifest.name,
+      current,
+      entries,
+      (key) => this.text(key),
+      this.preferences.autoShow,
+      async (enabled) => {
+        await this.save({ autoShow: enabled });
+      },
+      () => {
+        this.modal = null;
+        queue.active = null;
+      }
+    );
+    this.modal.open();
+    const seenVersion = compareVersions(current, this.preferences.seenVersion) > 0 ? current : this.preferences.seenVersion;
+    void this.save({ seenVersion }).catch(() => {
+      if (!this.disposed) new Notice(this.text("saveError"));
+    });
+  }
+  dispose() {
+    this.disposed = true;
+    const queue = queueFor(this.plugin.app);
+    queue.jobs = queue.jobs.filter((job) => job.id !== this.plugin.manifest.id);
+    this.modal?.close();
+    queue.pump();
+  }
+};
+var NotesModal = class extends Modal {
+  constructor(app, name, version, entries, text3, enabled, change, finished) {
+    super(app);
+    this.name = name;
+    this.version = version;
+    this.entries = entries;
+    this.text = text3;
+    this.enabled = enabled;
+    this.change = change;
+    this.finished = finished;
+  }
+  name;
+  version;
+  entries;
+  text;
+  enabled;
+  change;
+  finished;
+  onOpen() {
+    this.modalEl.addClass("qiaomu-update-notes");
+    this.modalEl.dir = this.text("done") === "\u062D\u0633\u0646\u064B\u0627" ? "rtl" : "ltr";
+    this.setTitle(`${this.name} \xB7 ${this.text("title")}`);
+    const content = this.contentEl;
+    content.createEl("p", { text: `v${this.version}`, cls: "qiaomu-update-notes-version" });
+    const entries = this.entries.length ? this.entries : [{ version: this.version, items: ["fallback"] }];
+    for (const entry of entries) {
+      const section = content.createEl("section", { cls: "qiaomu-update-notes-section" });
+      if (entries.length > 1) section.createEl("h3", { text: `v${entry.version}` });
+      const list = section.createEl("ul");
+      for (const item of entry.items) list.createEl("li", { text: this.text(item) });
+    }
+    const footer = content.createDiv({ cls: "qiaomu-update-notes-footer" });
+    const label2 = footer.createEl("label", { cls: "qiaomu-update-notes-option" });
+    const input = label2.createEl("input", { attr: { type: "checkbox" } });
+    input.checked = this.enabled;
+    label2.createSpan({ text: this.text("automatic") });
+    input.addEventListener("change", () => {
+      const desired = input.checked;
+      input.disabled = true;
+      void this.change(desired).then(() => {
+        this.enabled = desired;
+      }).catch(() => {
+        input.checked = this.enabled;
+        new Notice(this.text("saveError"));
+      }).finally(() => {
+        input.disabled = false;
+      });
+    });
+    const close = footer.createEl("button", { text: this.text("done"), cls: "qiaomu-update-notes-done", attr: { type: "button" } });
+    close.addEventListener("click", () => this.close());
+  }
+  onClose() {
+    this.contentEl.empty();
+    this.finished();
+  }
+};
+
+// src/client/home-release.ts
+init_original_globals();
+var UPDATE_ENTRIES = [
+  {
+    version: "0.4.0",
+    items: ["introduced", "revisit", "control", "smooth", "steady"]
+  }
+];
+
 // src/original/task-index.ts
 init_original_globals();
 
@@ -47277,14 +47749,45 @@ init_original_globals();
 
 // src/original/ecosystem.ts
 init_original_globals();
+
+// src/client/plugin-pages.ts
+init_original_globals();
+var DSH_REPOSITORIES = {
+  "qiaomu-reader": "qiaomu-reader-dsh",
+  "qiaomu-ai-rss": "qiaomu-rss-dsh",
+  "qiaomu-radio": "qiaomu-radio-dsh",
+  "qiaomu-audio": "qiaomu-audio-dsh",
+  "qiaomu-ui-learn": "qiaomu-ui-learn-dsh",
+  "qiaomu-publish": "qiaomu-publish-dsh",
+  "qiaomu-cover-design": "qiaomu-cover-design-dsh",
+  "qiaomu-blog-publisher": "qiaomu-blog-publisher-dsh"
+};
+function openHarnessPluginPage(id) {
+  const repository = DSH_REPOSITORIES[id];
+  if (repository)
+    window.open(
+      "https://github.com/joeseesun/" + repository + "/releases",
+      "_blank",
+      "noopener,noreferrer"
+    );
+  else
+    new Notice(
+      L(
+        "\u8FD9\u9879\u96C6\u6210\u4F9D\u8D56 Obsidian \u63D2\u4EF6\uFF0C\u5F53\u524D\u6CA1\u6709\u53EF\u5B89\u88C5\u7684 Harness \u7248\u672C\u3002",
+        "This integration requires an Obsidian plugin. A Harness version is not available here."
+      )
+    );
+}
+
+// src/original/ecosystem.ts
 var KNOWN_PLUGINS = [
   {
     id: "qiaomu-reader",
     name: { zh: "\u4E54\u6728 Reader", en: "Qiaomu Reader" },
-    pitch: { zh: "\u5728 Obsidian \u91CC\u8BFB EPUB\u3001PDF\u3001MOBI\uFF0C\u5212\u7EBF\u76F4\u63A5\u6210\u4E3A\u7B14\u8BB0", en: "Read EPUB, PDF and MOBI with highlights that become notes" },
+    pitch: { zh: "\u5728 Harness \u91CC\u8BFB EPUB\u3001PDF\u3001MOBI\uFF0C\u5212\u7EBF\u76F4\u63A5\u6210\u4E3A\u7B14\u8BB0", en: "Read EPUB, PDF and MOBI with highlights that become notes" },
     icon: "book-open",
     openCommand: "qiaomu-reader:open-library",
-    repo: "https://github.com/joeseesun/qiaomu-reader"
+    repo: "https://github.com/joeseesun/qiaomu-reader-dsh"
   },
   {
     id: "qiaomu-ai-rss",
@@ -47292,7 +47795,7 @@ var KNOWN_PLUGINS = [
     pitch: { zh: "AI \u6539\u5199\u4E0E\u7FFB\u8BD1\u7684\u4FE1\u606F\u6D41\uFF0C\u4E00\u952E\u6458\u8FDB\u65E5\u8BB0", en: "AI-rewritten feeds you can clip into your daily note" },
     icon: "rss",
     openCommand: "qiaomu-ai-rss:open-reader",
-    repo: "https://github.com/joeseesun/qiaomu-ai-rss"
+    repo: "https://github.com/joeseesun/qiaomu-rss-dsh"
   },
   {
     id: "qiaomu-radio",
@@ -47300,7 +47803,7 @@ var KNOWN_PLUGINS = [
     pitch: { zh: "\u5199\u4F5C\u65F6\u542C\u5168\u7403\u7535\u53F0\uFF0C\u8D8A\u542C\u8D8A\u61C2\u4F60\u7684\u53E3\u5473", en: "Live radio from around the world while you write" },
     icon: "radio-tower",
     openCommand: "qiaomu-radio:open-radio",
-    repo: "https://github.com/joeseesun/qiaomu-radio"
+    repo: "https://github.com/joeseesun/qiaomu-radio-dsh"
   },
   {
     id: "qiaomu-agent",
@@ -47338,7 +47841,7 @@ function listCommands(app) {
   return Object.values(host(app).commands?.commands ?? {});
 }
 function openPluginPage(id) {
-  window.open(`obsidian://show-plugin?id=${encodeURIComponent(id)}`);
+  openHarnessPluginPage(id);
 }
 function openCommunityPluginSettings(app) {
   const setting = host(app).setting;
@@ -47584,151 +48087,6 @@ function defaultHomeShortcuts(chinese) {
 // src/original/settings.ts
 init_original_globals();
 
-// src/original/discovery.ts
-init_original_globals();
-function defaultSites(sites) {
-  return sites.filter((site) => !site.off).map((site) => site.id);
-}
-function translateTarget(text3) {
-  return /[\u3400-\u9fff]/.test(text3) ? "en" : "zh";
-}
-var DISCOVERY_MODULES = {
-  "multi-search": {
-    zh: "\u591A\u7AD9\u641C\u7D22",
-    en: "Search across sites",
-    icon: "search",
-    descriptionZh: "\u4E00\u6B21\u8F93\u5165\uFF0C\u5728\u9009\u5B9A\u7684\u7F51\u7AD9\u5206\u522B\u641C\u7D22\u3002",
-    descriptionEn: "Search selected websites with one query.",
-    sites: [
-      { id: "google", zh: "Google", en: "Google", icon: "globe", home: "https://www.google.com/", search: (q2) => `https://www.google.com/search?q=${encodeURIComponent(q2)}` },
-      { id: "bing", zh: "Bing", en: "Bing", icon: "globe", home: "https://www.bing.com/", search: (q2) => `https://www.bing.com/search?q=${encodeURIComponent(q2)}` },
-      { id: "duckduckgo", zh: "DuckDuckGo", en: "DuckDuckGo", icon: "globe", home: "https://duckduckgo.com/", search: (q2) => `https://duckduckgo.com/?q=${encodeURIComponent(q2)}` },
-      { id: "wikipedia", zh: "\u7EF4\u57FA\u767E\u79D1", en: "Wikipedia", icon: "book-open", home: "https://www.wikipedia.org/", search: (q2) => `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(q2)}` },
-      { id: "brave", zh: "Brave", en: "Brave", icon: "shield", home: "https://search.brave.com/", off: true, search: (q2) => `https://search.brave.com/search?q=${encodeURIComponent(q2)}` },
-      { id: "baidu", zh: "\u767E\u5EA6", en: "Baidu", icon: "globe", home: "https://www.baidu.com/", off: true, search: (q2) => `https://www.baidu.com/s?wd=${encodeURIComponent(q2)}` }
-    ]
-  },
-  "book-finder": {
-    zh: "\u627E\u7535\u5B50\u4E66",
-    en: "Find books",
-    icon: "book-open",
-    descriptionZh: "\u627E\u4E66\u76EE\u4E0E\u53EF\u5408\u6CD5\u9605\u8BFB\u3001\u4E0B\u8F7D\u7684\u516C\u7248\u4E66\u3002",
-    descriptionEn: "Find books and public-domain editions.",
-    sites: [
-      { id: "openlibrary", zh: "Open Library", en: "Open Library", icon: "library", home: "https://openlibrary.org/", search: (q2) => `https://openlibrary.org/search?q=${encodeURIComponent(q2)}` },
-      { id: "gutenberg", zh: "\u53E4\u817E\u5821\u8BA1\u5212", en: "Project Gutenberg", icon: "book-open", home: "https://www.gutenberg.org/", search: (q2) => `https://www.gutenberg.org/ebooks/?query=${encodeURIComponent(q2)}` },
-      { id: "douban-book", zh: "\u8C46\u74E3\u8BFB\u4E66", en: "Douban Books", icon: "book-marked", home: "https://book.douban.com/", search: (q2) => `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(q2)}` },
-      { id: "google-books", zh: "Google \u56FE\u4E66", en: "Google Books", icon: "book", home: "https://books.google.com/", search: (q2) => `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(q2)}` }
-    ]
-  },
-  "watch-finder": {
-    zh: "\u627E\u89C6\u9891\u4E0E\u7535\u5F71",
-    en: "Find video and film",
-    icon: "clapperboard",
-    descriptionZh: "\u641C\u7D22 YouTube \u89C6\u9891\u548C\u7535\u5F71\u8D44\u6599\uFF1B\u89C2\u770B\u4EA4\u7ED9\u6765\u6E90\u7F51\u7AD9\u3002",
-    descriptionEn: "Search YouTube and film catalogs; watch at the source.",
-    sites: [
-      { id: "youtube", zh: "YouTube", en: "YouTube", icon: "video", home: "https://www.youtube.com/", search: (q2) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q2)}` },
-      { id: "bilibili", zh: "\u54D4\u54E9\u54D4\u54E9", en: "Bilibili", icon: "video", home: "https://www.bilibili.com/", search: (q2) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(q2)}` },
-      { id: "imdb", zh: "IMDb", en: "IMDb", icon: "clapperboard", home: "https://www.imdb.com/", search: (q2) => `https://www.imdb.com/find/?q=${encodeURIComponent(q2)}` },
-      { id: "douban-movie", zh: "\u8C46\u74E3\u7535\u5F71", en: "Douban Movies", icon: "film", home: "https://movie.douban.com/", search: (q2) => `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(q2)}` },
-      { id: "justwatch", zh: "JustWatch \u89C2\u770B\u6E20\u9053", en: "JustWatch", icon: "tv", home: "https://www.justwatch.com/", search: (q2) => `https://www.justwatch.com/us/search?q=${encodeURIComponent(q2)}` }
-    ]
-  },
-  "music-finder": {
-    zh: "Spotify \u641C\u7D22",
-    en: "Search Spotify",
-    icon: "music",
-    descriptionZh: "\u627E\u6B4C\u66F2\u548C\u64AD\u5BA2\uFF0C\u4EA4\u7ED9 Spotify \u64AD\u653E\u3002",
-    descriptionEn: "Find music and podcasts, then play them in Spotify.",
-    sites: [
-      { id: "spotify", zh: "Spotify", en: "Spotify", icon: "music", home: "https://open.spotify.com/", search: (q2) => `https://open.spotify.com/search/${encodeURIComponent(q2)}` }
-    ]
-  },
-  "ai-learning": {
-    zh: "\u5B66 AI",
-    en: "Learn AI",
-    icon: "graduation-cap",
-    descriptionZh: "\u6253\u5F00\u53EF\u4FE1\u7684 AI \u5B66\u4E60\u8D44\u6599\uFF0C\u8FDB\u5EA6\u4FDD\u7559\u5728\u539F\u7F51\u7AD9\u3002",
-    descriptionEn: "Open trusted AI lessons; progress stays at the source.",
-    sites: [
-      { id: "openai-academy", zh: "OpenAI Academy", en: "OpenAI Academy", icon: "graduation-cap", home: "https://academy.openai.com/" },
-      { id: "hf-learn", zh: "Hugging Face Learn", en: "Hugging Face Learn", icon: "book-open", home: "https://huggingface.co/learn" },
-      { id: "deeplearning-ai", zh: "DeepLearning.AI \u77ED\u8BFE", en: "DeepLearning.AI short courses", icon: "graduation-cap", home: "https://www.deeplearning.ai/short-courses/" },
-      { id: "fast-ai", zh: "fast.ai \u5B9E\u6218\u8BFE", en: "fast.ai course", icon: "book-open", home: "https://course.fast.ai/" }
-    ]
-  },
-  "paper-finder": {
-    zh: "\u627E\u8BBA\u6587",
-    en: "Find papers",
-    icon: "file-search",
-    descriptionZh: "\u7528\u6807\u9898\u6216\u5173\u952E\u8BCD\u68C0\u7D22\u8BBA\u6587\uFF0C\u9605\u8BFB\u7559\u5728\u6765\u6E90\u7F51\u7AD9\u3002",
-    descriptionEn: "Find research papers by title or keyword.",
-    sites: [
-      { id: "arxiv", zh: "arXiv", en: "arXiv", icon: "file-text", home: "https://arxiv.org/", search: (q2) => `https://arxiv.org/search/?query=${encodeURIComponent(q2)}&searchtype=all` },
-      { id: "crossref", zh: "Crossref", en: "Crossref", icon: "book-open", home: "https://search.crossref.org/", search: (q2) => `https://search.crossref.org/?q=${encodeURIComponent(q2)}` },
-      { id: "semantic-scholar", zh: "Semantic Scholar", en: "Semantic Scholar", icon: "sparkles", home: "https://www.semanticscholar.org/", search: (q2) => `https://www.semanticscholar.org/search?q=${encodeURIComponent(q2)}` },
-      { id: "google-scholar", zh: "Google \u5B66\u672F", en: "Google Scholar", icon: "graduation-cap", home: "https://scholar.google.com/", search: (q2) => `https://scholar.google.com/scholar?q=${encodeURIComponent(q2)}` }
-    ]
-  },
-  "word-finder": {
-    zh: "\u67E5\u8BCD",
-    en: "Look up a word",
-    icon: "book-a",
-    descriptionZh: "\u4E00\u8BCD\u67E5\u8BE2\u591A\u4E2A\u8BCD\u5178\uFF0C\u7ED3\u679C\u5728\u6765\u6E90\u7F51\u7AD9\u67E5\u770B\u3002",
-    descriptionEn: "Look up a word in trusted dictionaries.",
-    sites: [
-      { id: "cambridge", zh: "\u5251\u6865\u8BCD\u5178", en: "Cambridge Dictionary", icon: "book-open", home: "https://dictionary.cambridge.org/", search: (q2) => `https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(q2)}` },
-      { id: "wiktionary", zh: "\u7EF4\u57FA\u8BCD\u5178", en: "Wiktionary", icon: "book-open", home: "https://en.wiktionary.org/", search: (q2) => `https://en.wiktionary.org/w/index.php?search=${encodeURIComponent(q2)}` },
-      { id: "youdao", zh: "\u6709\u9053\u8BCD\u5178", en: "Youdao", icon: "languages", home: "https://dict.youdao.com/", search: (q2) => `https://dict.youdao.com/result?word=${encodeURIComponent(q2)}&lang=en` },
-      { id: "merriam-webster", zh: "\u97E6\u6C0F\u8BCD\u5178", en: "Merriam-Webster", icon: "book-a", home: "https://www.merriam-webster.com/", search: (q2) => `https://www.merriam-webster.com/dictionary/${encodeURIComponent(q2)}` }
-    ]
-  },
-  "translate": {
-    zh: "\u7FFB\u8BD1",
-    en: "Translate",
-    icon: "languages",
-    descriptionZh: "\u4E2D\u6587\u8BD1\u6210\u82F1\u6587\uFF0C\u5176\u4ED6\u8BED\u8A00\u8BD1\u6210\u4E2D\u6587\uFF0C\u5728\u7FFB\u8BD1\u7F51\u7AD9\u67E5\u770B\u7ED3\u679C\u3002",
-    descriptionEn: "Chinese to English, anything else to Chinese, at a translation site.",
-    sites: [
-      { id: "google-translate", zh: "Google \u7FFB\u8BD1", en: "Google Translate", icon: "languages", home: "https://translate.google.com/", search: (q2) => `https://translate.google.com/?sl=auto&tl=${translateTarget(q2) === "zh" ? "zh-CN" : "en"}&text=${encodeURIComponent(q2)}&op=translate` },
-      { id: "deepl", zh: "DeepL", en: "DeepL", icon: "languages", home: "https://www.deepl.com/translator", search: (q2) => `https://www.deepl.com/translator#auto/${translateTarget(q2)}/${encodeURIComponent(q2).replace(/%2F/gi, "%5C%2F")}` },
-      { id: "bing-translate", zh: "\u5FC5\u5E94\u7FFB\u8BD1", en: "Bing Translator", icon: "languages", home: "https://www.bing.com/translator", search: (q2) => `https://www.bing.com/translator?from=auto-detect&to=${translateTarget(q2) === "zh" ? "zh-Hans" : "en"}&text=${encodeURIComponent(q2)}` }
-    ]
-  },
-  "dev-inbox": {
-    zh: "GitHub \u5F85\u529E",
-    en: "GitHub inbox",
-    icon: "git-pull-request",
-    descriptionZh: "\u6253\u5F00\u5F85\u4F60\u5BA1\u9605\u7684 PR\u3001\u5206\u914D\u7ED9\u4F60\u7684 Issue \u548C\u901A\u77E5\uFF1B\u767B\u5F55\u72B6\u6001\u7559\u5728\u6D4F\u89C8\u5668\u3002",
-    descriptionEn: "Open review requests, assigned issues and notifications; sign-in stays in your browser.",
-    sites: [
-      { id: "github-search", zh: "\u641C\u7D22\u4ED3\u5E93", en: "Search repositories", icon: "search", home: "https://github.com/search", search: (q2) => `https://github.com/search?q=${encodeURIComponent(q2)}&type=repositories` },
-      { id: "github-reviews", zh: "\u5F85\u6211\u5BA1\u9605", en: "Review requests", icon: "git-pull-request", home: "https://github.com/pulls/review-requested" },
-      { id: "github-pulls", zh: "\u6211\u7684 PR", en: "My pull requests", icon: "git-merge", home: "https://github.com/pulls" },
-      { id: "github-issues", zh: "\u5206\u914D\u7ED9\u6211", en: "Assigned issues", icon: "circle-dot", home: "https://github.com/issues/assigned" },
-      { id: "github-notifications", zh: "\u901A\u77E5", en: "Notifications", icon: "bell", home: "https://github.com/notifications" }
-    ]
-  }
-};
-function discoveryUrl(site, query) {
-  return query.trim() && site.search ? site.search(query.trim().slice(0, 300)) : site.home;
-}
-function parseSearchTemplates(input) {
-  return input.split(/\r?\n/).filter((line) => line.trim()).slice(0, 8).map((line, index) => {
-    const separator = line.indexOf("|");
-    const name = line.slice(0, separator).trim(), url = line.slice(separator + 1).trim();
-    if (separator < 1 || !name || !url.includes("{query}")) throw new Error(L("\u7B2C {line} \u884C\u9700\u8981\uFF1A\u540D\u79F0 | https://example.com/?q={query}", "Line {line} needs: Name | https://example.com/?q={query}", { line: index + 1 }));
-    const parsed = new URL(url.replaceAll("{query}", "test"));
-    if (parsed.origin !== new URL(url.replaceAll("{query}", "other")).origin) throw new Error(L("\u7B2C {line} \u884C\u7684 {query} \u53EA\u80FD\u653E\u5728\u8DEF\u5F84\u6216\u67E5\u8BE2\u53C2\u6570\u4E2D", "Line {line}: {query} can only appear in the path or query string", { line: index + 1 }));
-    if (!["https:", "http:"].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error(L("\u7B2C {line} \u884C\u7684\u7F51\u5740\u65E0\u6548", "Line {line}: invalid URL", { line: index + 1 }));
-    return { name: name.slice(0, 60), url };
-  });
-}
-function customSearchSites(templates) {
-  return templates.map((template) => ({ id: `custom:${template.url}`, zh: template.name, en: template.name, icon: "globe", home: new URL(template.url.replaceAll("{query}", "")).origin, search: (query) => template.url.replaceAll("{query}", encodeURIComponent(query)) }));
-}
-
 // src/original/extra-catalog.ts
 init_original_globals();
 var EXTRA_MODULES = {
@@ -47937,7 +48295,7 @@ function parseSnippets(markdown) {
 function parseQuotes(markdown) {
   return contentLines(markdown).map(({ text: text3 }) => text3.replace(listMarker, "").replace(/^>\s?/, "").trim()).filter((text3) => text3.length > 1 && !/^(#|\||!\[|<|%%|---$)/.test(text3)).map((text3) => text3.slice(0, 400));
 }
-function dailyIndex(day, length, offset = 0) {
+function dailyIndex2(day, length, offset = 0) {
   if (length <= 0) return -1;
   let hash = 2166136261;
   for (const char of day) {
@@ -48552,7 +48910,7 @@ function normalizeModules(value) {
       ...typeof candidate.query === "string" ? { query: candidate.query.slice(0, 500) } : {},
       ...Array.isArray(candidate.customSites) ? { customSites: candidate.customSites.flatMap((site) => {
         try {
-          return site && typeof site.name === "string" && typeof site.url === "string" ? parseSearchTemplates(`${site.name} | ${site.url}`) : [];
+          return site && typeof site.name === "string" && typeof site.url === "string" ? parseSearchTemplates2(`${site.name} | ${site.url}`) : [];
         } catch {
           return [];
         }
@@ -49380,11 +49738,11 @@ function renderExtra(parent, plugin, id, pageId, configure) {
         button(body, L("\u66F4\u6362\u6765\u6E90", "Change source"), configure, "settings-2");
         return;
       }
-      const index = dailyIndex(localDay(), quotes.length, offsets.get(key) ?? 0);
+      const index = dailyIndex2(localDay(), quotes.length, offsets.get(key) ?? app.home?.quoteShift ?? 0);
       body.createDiv({ cls: "qh-quote", text: quotes[index] });
       const actions = body.createDiv({ cls: "qh-workflow-actions" });
       button(actions, L("\u6362\u4E00\u53E5", "Another"), () => {
-        offsets.set(key, (offsets.get(key) ?? 0) + 1);
+        offsets.set(key, (offsets.get(key) ?? app.home?.quoteShift ?? 0) + 1);
         paint(quotes, file2);
         body.querySelector(".qh-workflow-actions button")?.focus();
       }, "shuffle");
@@ -49423,7 +49781,7 @@ function renderExtra(parent, plugin, id, pageId, configure) {
           button(body, L("\u6253\u5F00\u7B14\u8BB0", "Open note"), () => open(file), "arrow-up-right");
           return;
         }
-        const index = dailyIndex(localDay(), cards.length, offsets.get(key) ?? 0), item = cards[index];
+        const index = dailyIndex2(localDay(), cards.length, offsets.get(key) ?? 0), item = cards[index];
         const shown = revealed.has(`${key}:${index}`);
         body.createDiv({ cls: "qh-native-scope", text: L("\u7B2C {v} / {length} \u5F20", "Card {v} of {length}", { v: index + 1, length: cards.length }) });
         body.createDiv({ cls: "qh-flash-question", text: item.question });
@@ -49588,7 +49946,7 @@ function renderExtra(parent, plugin, id, pageId, configure) {
         plugin.settings.ambient = { ...plugin.settings.ambient, volume: Number(volume.value) };
         void plugin.saveSettings({ rerender: false }).catch(() => new Notice(t("layout.saveFailed")));
       });
-      body.createDiv({ cls: "qh-native-scope", text: player.playing ? L("\u6B63\u5728\u64AD\u653E \xB7 \u5173\u95ED Obsidian \u6216\u505C\u7528\u63D2\u4EF6\u65F6\u505C\u6B62", "Playing \xB7 stops when Obsidian closes") : L("\u672C\u5730\u751F\u6210\uFF0C\u65E0\u9700\u8054\u7F51", "Generated locally, no network") });
+      body.createDiv({ cls: "qh-native-scope", text: player.playing ? L("\u6B63\u5728\u64AD\u653E \xB7 \u5173\u95ED Harness \u6216\u505C\u7528\u63D2\u4EF6\u65F6\u505C\u6B62", "Playing \xB7 stops when Harness closes") : L("\u672C\u5730\u751F\u6210\uFF0C\u65E0\u9700\u8054\u7F51", "Generated locally, no network") });
     };
     const unsubscribe = player.onChange(() => {
       if (card.isConnected) paint();
@@ -52748,202 +53106,6 @@ init_original_globals();
 
 // src/client/native-cards.ts
 init_original_globals();
-
-// src/client/data.js
-init_original_globals();
-function dailyIndex2(day, length, offset = 0) {
-  if (length <= 0) return -1;
-  let hash = 2166136261;
-  for (const char of day) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (((hash >>> 0) + offset) % length + length) % length;
-}
-function dayKey(date = /* @__PURE__ */ new Date()) {
-  const m2 = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${m2}-${d}`;
-}
-var WEATHER_CITIES = [
-  { id: "beijing", label: "\u5317\u4EAC", labelEn: "Beijing", latitude: 39.9042, longitude: 116.4074 },
-  { id: "shanghai", label: "\u4E0A\u6D77", labelEn: "Shanghai", latitude: 31.2304, longitude: 121.4737 },
-  { id: "shenzhen", label: "\u6DF1\u5733", labelEn: "Shenzhen", latitude: 22.5431, longitude: 114.0579 },
-  { id: "hangzhou", label: "\u676D\u5DDE", labelEn: "Hangzhou", latitude: 30.2741, longitude: 120.1551 },
-  { id: "chengdu", label: "\u6210\u90FD", labelEn: "Chengdu", latitude: 30.5728, longitude: 104.0668 },
-  { id: "tokyo", label: "\u4E1C\u4EAC", labelEn: "Tokyo", latitude: 35.6762, longitude: 139.6503 },
-  { id: "singapore", label: "\u65B0\u52A0\u5761", labelEn: "Singapore", latitude: 1.3521, longitude: 103.8198 },
-  { id: "newyork", label: "\u7EBD\u7EA6", labelEn: "New York", latitude: 40.7128, longitude: -74.006 },
-  { id: "london", label: "\u4F26\u6566", labelEn: "London", latitude: 51.5072, longitude: -0.1276 },
-  { id: "berlin", label: "\u67CF\u6797", labelEn: "Berlin", latitude: 52.52, longitude: 13.405 }
-];
-function normalizeUrl(input) {
-  try {
-    const url = new URL(String(input ?? "").trim());
-    if ((url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password) return url.href;
-    return null;
-  } catch {
-    return null;
-  }
-}
-function quickNotesMarkdown(notes) {
-  const byDay = /* @__PURE__ */ new Map();
-  for (const note of [...notes].reverse()) {
-    const key = dayKey(new Date(note.time));
-    if (!byDay.has(key)) byDay.set(key, []);
-    const date = new Date(note.time);
-    const hh = String(date.getHours()).padStart(2, "0");
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    byDay.get(key).push(`- ${hh}:${mm} ${note.text}`);
-  }
-  const lines = [];
-  for (const [day, items] of byDay) lines.push(`## ${day}`, "", ...items, "");
-  return lines.join("\n").trim();
-}
-var DAILY_QUESTIONS = {
-  zh: [
-    "\u4ECA\u5929\u6700\u91CD\u8981\u7684\u4E00\u4EF6\u4E8B\u662F\u4EC0\u4E48\uFF1F",
-    "\u6700\u8FD1\u6709\u4EC0\u4E48\u8BA9\u4F60\u4F1A\u5FC3\u4E00\u7B11\u7684\u77AC\u95F4\uFF1F",
-    "\u73B0\u5728\u6700\u5360\u7528\u4F60\u5FC3\u529B\u7684\u4E8B\u662F\u4EC0\u4E48\uFF1F",
-    "\u8FD9\u5468\u60F3\u5BF9\u81EA\u5DF1\u8BF4\u53E5\u4EC0\u4E48\u8BDD\uFF1F",
-    "\u6709\u4EC0\u4E48\u4E00\u76F4\u60F3\u5F00\u59CB\u5374\u8FD8\u6CA1\u5F00\u59CB\u7684\u4E8B\uFF1F",
-    "\u4ECA\u5929\u5B66\u5230\u4E86\u4EC0\u4E48\u65B0\u4E1C\u897F\uFF1F",
-    "\u6700\u8FD1\u8C01\u5E2E\u52A9\u8FC7\u4F60\uFF1F\u60F3\u600E\u4E48\u611F\u8C22\uFF1F",
-    "\u6B64\u523B\u6700\u8BA9\u4F60\u5B89\u5FC3\u7684\u662F\u4EC0\u4E48\uFF1F",
-    "\u5982\u679C\u4ECA\u5929\u53EA\u505A\u4E00\u4EF6\u4E8B\uFF0C\u4F1A\u662F\u54EA\u4EF6\uFF1F",
-    "\u6700\u8FD1\u6709\u4EC0\u4E48\u51B3\u5B9A\u4E00\u76F4\u5728\u62D6\u5EF6\uFF1F",
-    "\u4ECA\u5929\u8EAB\u4F53\u611F\u89C9\u600E\u4E48\u6837\uFF1F",
-    "\u6700\u8FD1\u5728\u8BFB/\u5728\u770B\u4EC0\u4E48\uFF1F\u503C\u5F97\u63A8\u8350\u5417\uFF1F",
-    "\u6709\u4EC0\u4E48\u60F3\u6CD5\u6700\u8FD1\u4E00\u76F4\u5728\u8111\u5B50\u91CC\u8F6C\uFF1F",
-    "\u8FD9\u4E2A\u6708\u60F3\u517B\u6210\u6216\u6212\u6389\u4EC0\u4E48\u4E60\u60EF\uFF1F",
-    "\u73B0\u5728\u7684\u5DE5\u4F5C\u65B9\u5F0F\u91CC\uFF0C\u54EA\u4E00\u70B9\u6700\u60F3\u6539\u8FDB\uFF1F"
-  ],
-  en: [
-    "What is the single most important thing today?",
-    "What made you smile recently?",
-    "What is occupying your mind the most right now?",
-    "What would you tell yourself this week?",
-    "What have you been meaning to start but haven\u2019t?",
-    "What did you learn today?",
-    "Who helped you recently, and how could you thank them?",
-    "What gives you peace of mind right now?",
-    "If you could do only one thing today, what would it be?",
-    "Which decision have you been putting off?",
-    "How does your body feel today?",
-    "What are you reading or watching lately? Worth recommending?",
-    "Which idea keeps circling in your head?",
-    "What habit do you want to build or drop this month?",
-    "What would you improve about how you work right now?"
-  ]
-};
-var SEARCH_GROUPS = [
-  {
-    id: "web",
-    zh: "\u591A\u7AD9\u641C\u7D22",
-    en: "Search across sites",
-    sites: [
-      { id: "google", zh: "\u8C37\u6B4C", en: "Google", home: "https://www.google.com/", search: (q2) => `https://www.google.com/search?q=${encodeURIComponent(q2)}` },
-      { id: "bing", zh: "\u5FC5\u5E94", en: "Bing", home: "https://www.bing.com/", search: (q2) => `https://www.bing.com/search?q=${encodeURIComponent(q2)}` },
-      { id: "duckduckgo", zh: "DuckDuckGo", en: "DuckDuckGo", home: "https://duckduckgo.com/", search: (q2) => `https://duckduckgo.com/?q=${encodeURIComponent(q2)}` },
-      { id: "wikipedia", zh: "\u7EF4\u57FA\u767E\u79D1", en: "Wikipedia", home: "https://www.wikipedia.org/", search: (q2) => `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(q2)}` },
-      { id: "baidu", zh: "\u767E\u5EA6", en: "Baidu", off: true, home: "https://www.baidu.com/", search: (q2) => `https://www.baidu.com/s?wd=${encodeURIComponent(q2)}` },
-      { id: "brave", zh: "Brave", en: "Brave", off: true, home: "https://search.brave.com/", search: (q2) => `https://search.brave.com/search?q=${encodeURIComponent(q2)}` },
-      { id: "github", zh: "GitHub", en: "GitHub", off: true, home: "https://github.com/", search: (q2) => `https://github.com/search?q=${encodeURIComponent(q2)}` },
-      { id: "zhihu", zh: "\u77E5\u4E4E", en: "Zhihu", off: true, home: "https://www.zhihu.com/", search: (q2) => `https://www.zhihu.com/search?type=content&q=${encodeURIComponent(q2)}` }
-    ]
-  },
-  {
-    id: "books",
-    zh: "\u627E\u7535\u5B50\u4E66",
-    en: "Find books",
-    sites: [
-      { id: "openlibrary", zh: "Open Library", en: "Open Library", home: "https://openlibrary.org/", search: (q2) => `https://openlibrary.org/search?q=${encodeURIComponent(q2)}` },
-      { id: "gutenberg", zh: "\u53E4\u817E\u5821\u8BA1\u5212", en: "Project Gutenberg", home: "https://www.gutenberg.org/", search: (q2) => `https://www.gutenberg.org/ebooks/?query=${encodeURIComponent(q2)}` },
-      { id: "douban-book", zh: "\u8C46\u74E3\u8BFB\u4E66", en: "Douban Books", home: "https://book.douban.com/", search: (q2) => `https://search.douban.com/book/subject_search?search_text=${encodeURIComponent(q2)}` },
-      { id: "google-books", zh: "Google \u56FE\u4E66", en: "Google Books", home: "https://books.google.com/", search: (q2) => `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(q2)}` }
-    ]
-  },
-  {
-    id: "video",
-    zh: "\u627E\u89C6\u9891\u4E0E\u7535\u5F71",
-    en: "Find video and film",
-    sites: [
-      { id: "youtube", zh: "YouTube", en: "YouTube", home: "https://www.youtube.com/", search: (q2) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q2)}` },
-      { id: "bilibili", zh: "\u54D4\u54E9\u54D4\u54E9", en: "Bilibili", home: "https://www.bilibili.com/", search: (q2) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(q2)}` },
-      { id: "imdb", zh: "IMDb", en: "IMDb", home: "https://www.imdb.com/", search: (q2) => `https://www.imdb.com/find/?q=${encodeURIComponent(q2)}` },
-      { id: "douban-movie", zh: "\u8C46\u74E3\u7535\u5F71", en: "Douban Movies", home: "https://movie.douban.com/", search: (q2) => `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(q2)}` },
-      { id: "justwatch", zh: "JustWatch", en: "JustWatch", home: "https://www.justwatch.com/", search: (q2) => `https://www.justwatch.com/us/search?q=${encodeURIComponent(q2)}` }
-    ]
-  },
-  {
-    id: "music",
-    zh: "Spotify \u641C\u7D22",
-    en: "Search Spotify",
-    sites: [
-      { id: "spotify", zh: "Spotify", en: "Spotify", home: "https://open.spotify.com/", search: (q2) => `https://open.spotify.com/search/${encodeURIComponent(q2)}` }
-    ]
-  },
-  {
-    id: "ai",
-    zh: "\u5B66 AI",
-    en: "Learn AI",
-    sites: [
-      { id: "openai-academy", zh: "OpenAI Academy", en: "OpenAI Academy", home: "https://academy.openai.com/" },
-      { id: "hf-learn", zh: "Hugging Face Learn", en: "Hugging Face Learn", home: "https://huggingface.co/learn" },
-      { id: "deeplearning-ai", zh: "DeepLearning.AI", en: "DeepLearning.AI", home: "https://www.deeplearning.ai/short-courses/" },
-      { id: "fast-ai", zh: "fast.ai", en: "fast.ai", home: "https://course.fast.ai/" }
-    ]
-  },
-  {
-    id: "papers",
-    zh: "\u627E\u8BBA\u6587",
-    en: "Find papers",
-    sites: [
-      { id: "arxiv", zh: "arXiv", en: "arXiv", home: "https://arxiv.org/", search: (q2) => `https://arxiv.org/search/?query=${encodeURIComponent(q2)}&searchtype=all` },
-      { id: "crossref", zh: "Crossref", en: "Crossref", home: "https://search.crossref.org/", search: (q2) => `https://search.crossref.org/?q=${encodeURIComponent(q2)}` },
-      { id: "semantic-scholar", zh: "Semantic Scholar", en: "Semantic Scholar", home: "https://www.semanticscholar.com/", search: (q2) => `https://www.semanticscholar.org/search?q=${encodeURIComponent(q2)}` },
-      { id: "google-scholar", zh: "Google \u5B66\u672F", en: "Google Scholar", home: "https://scholar.google.com/", search: (q2) => `https://scholar.google.com/scholar?q=${encodeURIComponent(q2)}` }
-    ]
-  },
-  {
-    id: "words",
-    zh: "\u67E5\u8BCD",
-    en: "Look up a word",
-    sites: [
-      { id: "cambridge", zh: "\u5251\u6865\u8BCD\u5178", en: "Cambridge Dictionary", home: "https://dictionary.cambridge.org/", search: (q2) => `https://dictionary.cambridge.org/search/english/direct/?q=${encodeURIComponent(q2)}` },
-      { id: "wiktionary", zh: "\u7EF4\u57FA\u8BCD\u5178", en: "Wiktionary", home: "https://en.wiktionary.org/", search: (q2) => `https://en.wiktionary.org/w/index.php?search=${encodeURIComponent(q2)}` },
-      { id: "youdao", zh: "\u6709\u9053\u8BCD\u5178", en: "Youdao", home: "https://dict.youdao.com/", search: (q2) => `https://dict.youdao.com/result?word=${encodeURIComponent(q2)}&lang=en` },
-      { id: "merriam-webster", zh: "\u97E6\u6C0F\u8BCD\u5178", en: "Merriam-Webster", home: "https://www.merriam-webster.com/", search: (q2) => `https://www.merriam-webster.com/dictionary/${encodeURIComponent(q2)}` }
-    ]
-  },
-  {
-    id: "translate",
-    zh: "\u7FFB\u8BD1",
-    en: "Translate",
-    sites: [
-      { id: "google-translate", zh: "Google \u7FFB\u8BD1", en: "Google Translate", home: "https://translate.google.com/", search: (q2) => `https://translate.google.com/?sl=auto&tl=${translateTarget2(q2)}&text=${encodeURIComponent(q2)}&op=translate` },
-      { id: "deepl", zh: "DeepL", en: "DeepL", home: "https://www.deepl.com/translator", search: (q2) => `https://www.deepl.com/translator#auto/${translateTarget2(q2)}/${encodeURIComponent(q2).replace(/%2F/gi, "%5C%2F")}` },
-      { id: "bing-translate", zh: "\u5FC5\u5E94\u7FFB\u8BD1", en: "Bing Translator", home: "https://www.bing.com/translator", search: (q2) => `https://www.bing.com/translator?from=auto-detect&to=${translateTarget2(q2) === "zh" ? "zh-Hans" : "en"}&text=${encodeURIComponent(q2)}` }
-    ]
-  },
-  {
-    id: "dev",
-    zh: "GitHub \u5F85\u529E",
-    en: "GitHub inbox",
-    sites: [
-      { id: "github-search", zh: "\u641C\u7D22\u4ED3\u5E93", en: "Search repositories", home: "https://github.com/search", search: (q2) => `https://github.com/search?q=${encodeURIComponent(q2)}&type=repositories` },
-      { id: "github-reviews", zh: "\u5F85\u6211\u5BA1\u9605", en: "Review requests", home: "https://github.com/pulls/review-requested" },
-      { id: "github-pulls", zh: "\u6211\u7684 PR", en: "My pull requests", home: "https://github.com/pulls" },
-      { id: "github-issues", zh: "\u5206\u914D\u7ED9\u6211", en: "Assigned issues", home: "https://github.com/issues/assigned" },
-      { id: "github-notifications", zh: "\u901A\u77E5", en: "Notifications", home: "https://github.com/notifications" }
-    ]
-  }
-];
-function translateTarget2(text3) {
-  return /[\u3400-\u9fff]/.test(text3) ? "en" : "zh";
-}
-
-// src/client/native-cards.ts
 function nativeModules() {
   return [
     {
@@ -53097,7 +53259,7 @@ ${value}
   }
   function editor(card, path, date = "") {
     const questions = DAILY_QUESTIONS[currentLanguage().startsWith("zh") ? "zh" : "en"];
-    const question = date ? questions[dailyIndex2(date, questions.length)] : "";
+    const question = date ? questions[dailyIndex(date, questions.length)] : "";
     const body = card.createDiv({ cls: "qh-native-preview" });
     if (question) body.createDiv({ cls: "qh-native-line", text: question });
     const field = body.createEl("textarea", {
@@ -54144,7 +54306,7 @@ var ModuleOptionsModal = class extends Modal {
           input.inputEl.rows = 4;
           input.setPlaceholder("\u77E5\u4E4E | https://www.zhihu.com/search?q={query}").setValue((options.customSites ?? []).map((site) => `${site.name} | ${site.url}`).join("\n"));
           autoSave(this.contentEl, custom, input.inputEl, (value) => {
-            const customSites = parseSearchTemplates(value);
+            const customSites = parseSearchTemplates2(value);
             const previous = moduleOptions(this.plugin.settings, this.moduleId, this.pageId);
             const sites = [...(previous.sites ?? defaultSites(config2.sites)).filter((id) => !id.startsWith("custom:")), ...customSites.map((site) => `custom:${site.url}`)];
             return persist({ customSites, sites });
@@ -56385,7 +56547,7 @@ init_original_globals();
 
 // src/original/wallpaper/curated.ts
 init_original_globals();
-var CURATED = [
+var CURATED2 = [
   ["Q1p7bh3SHj8", "photo-1451187580459-43490279c0fa", "NASA", "nasa", "#0c2626"],
   ["phIFdC6lA4E", "photo-1519681393784-d120267933ba", "Benjamin Voros", "vorosbenisop", "#0c2659"],
   ["sO-JmQj95ec", "photo-1492724724894-7464c27d0ceb", "Kevin Lanceplaine", "lanceplaine", "#262640"],
@@ -56439,13 +56601,13 @@ var CURATED = [
 ];
 
 // src/original/wallpaper/wallpaper.ts
-var UTM = "utm_source=qiaomu_home&utm_medium=referral";
+var UTM2 = "utm_source=qiaomu_home&utm_medium=referral";
 var IMAGE_EXTENSIONS = /* @__PURE__ */ new Set(["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"]);
 function credit(url) {
-  return `${url}${url.includes("?") ? "&" : "?"}${UTM}`;
+  return `${url}${url.includes("?") ? "&" : "?"}${UTM2}`;
 }
-function curatedPhotos() {
-  return CURATED.map(([id, path, author, username, color]) => ({
+function curatedPhotos2() {
+  return CURATED2.map(([id, path, author, username, color]) => ({
     id: `curated:${id}`,
     url: `https://images.unsplash.com/${path}`,
     author,
@@ -56455,7 +56617,7 @@ function curatedPhotos() {
   }));
 }
 function nextCurated(currentId, random = Math.random) {
-  const photos = curatedPhotos();
+  const photos = curatedPhotos2();
   const pool = photos.length > 1 ? photos.filter((photo2) => photo2.id !== currentId) : photos;
   return pool[Math.floor(random() * pool.length) % pool.length];
 }
@@ -56808,11 +56970,11 @@ var HomeSettingTab = class extends PluginSettingTab {
   renderHome(containerEl) {
     const settings = this.plugin.settings, save2 = (rerender = true) => this.save(rerender);
     new Setting(containerEl).setName(L("\u6253\u5F00\u65B9\u5F0F", "Opening")).setHeading();
-    new Setting(containerEl).setName(L("\u542F\u52A8\u65F6\u6253\u5F00\u4E3B\u9875", "Open on startup")).setDesc(L("\u6BCF\u6B21\u542F\u52A8 Obsidian\uFF0C\u90FD\u4ECE\u4E3B\u9875\u5F00\u59CB\u3002", "Start every Obsidian session on Home.")).addToggle((toggle) => toggle.setValue(settings.openOnStartup).onChange(async (value) => {
+    new Setting(containerEl).setName(L("\u542F\u52A8\u65F6\u6253\u5F00\u4E3B\u9875", "Open on startup")).setDesc(L("\u6BCF\u6B21\u542F\u52A8 Harness\uFF0C\u90FD\u4ECE\u4E3B\u9875\u5F00\u59CB\u3002", "Start every Harness session on Home.")).addToggle((toggle) => toggle.setValue(settings.openOnStartup).onChange(async (value) => {
       settings.openOnStartup = value;
       await save2(false);
     }));
-    new Setting(containerEl).setName(L("\u65B0\u6807\u7B7E\u9875\u663E\u793A\u4E3B\u9875", "Show Home in new tabs")).setDesc(L("\u4EE3\u66FF Obsidian \u7684\u7A7A\u767D\u65B0\u6807\u7B7E\u9875\u3002", "Replace Obsidian's empty new tab.")).addToggle((toggle) => toggle.setValue(settings.replaceNewTab).onChange(async (value) => {
+    new Setting(containerEl).setName(L("\u65B0\u6807\u7B7E\u9875\u663E\u793A\u4E3B\u9875", "Show Home in new tabs")).setDesc(L("Harness \u6CA1\u6709 Obsidian \u7684\u7A7A\u767D\u6807\u7B7E\u9875\u3002\u8BF7\u4F7F\u7528\u4FA7\u680F Home \u6216\u300C\u6253\u5F00\u4E3B\u9875\u300D\u547D\u4EE4\u3002", "Harness has no Obsidian-style empty tabs. Use Home in the sidebar or the Open Home command.")).addToggle((toggle) => toggle.setValue(settings.replaceNewTab).setDisabled(true).onChange(async (value) => {
       settings.replaceNewTab = value;
       await save2(false);
     }));
@@ -57205,7 +57367,7 @@ var WallpaperService = class {
       const url = path ? localImage(this.plugin.app, path) : null;
       return url ? { url } : null;
     }
-    const photo2 = wall.current ?? curatedPhotos()[0];
+    const photo2 = wall.current ?? curatedPhotos2()[0];
     const width = targetWidth(win.screen?.width ?? 1920, win.devicePixelRatio || 1);
     const cached2 = await this.cache.cached(photo2, width);
     if (!cached2) void this.cache.fetch(photo2, width);
@@ -65781,6 +65943,8 @@ async function legacyMigrationPlan(raw, language = "zh") {
     (byte) => byte.toString(16).padStart(2, "0")
   ).join("").slice(0, 24);
   const prefix = `Imported/Home-0.3/${id}`, state = loadState({ getItem: () => raw }), files = [];
+  includeLegacySearchSites();
+  const searchOptions = legacySearchOptions(state);
   const settings = normalizeSettings(null);
   settings.homeShortcutsSeeded = true;
   settings.todoDaily = false;
@@ -65791,6 +65955,7 @@ async function legacyMigrationPlan(raw, language = "zh") {
   settings.customHeadline = state.headline;
   settings.wallpaper.source = state.wallpaperMode === "gradient" ? "none" : "curated";
   settings.wallpaper.rotation = state.wallpaperMode === "open" ? "open" : "daily";
+  Object.assign(settings.wallpaper, legacyWallpaper(state) || {});
   settings.countdown = state.countdown;
   settings.dailyFocus = {
     day: state.dailyFocus.date,
@@ -65815,7 +65980,9 @@ async function legacyMigrationPlan(raw, language = "zh") {
       icon: { book: "book-open", pen: "pencil" }[item.icon] || item.icon
     }))
   }));
-  const mapCard = (id2) => id2 === "shortcuts" ? ["shortcut:home-shortcuts"] : id2.startsWith("shortcut:") ? [id2] : id2.startsWith("plugin:") ? [sectionKey(id2.split(":")[1], id2.split(":")[2])] : CARD_MAP[id2] || [id2];
+  const mapCard = (id2) => id2 === "shortcuts" ? ["shortcut:home-shortcuts"] : id2.startsWith("shortcut:") ? [id2] : id2.startsWith("plugin:") ? [sectionKey(id2.split(":")[1], id2.split(":")[2])] : id2 === "multiSearch" ? [
+    Object.hasOwn(SEARCH_MODULES, state.searchGroup) ? SEARCH_MODULES[state.searchGroup] : "multi-search"
+  ] : CARD_MAP[id2] || [id2];
   const habitNames2 = /* @__PURE__ */ Object.create(null);
   const usedNames = /* @__PURE__ */ new Set();
   const reserved = /* @__PURE__ */ new Set([
@@ -65852,6 +66019,16 @@ async function legacyMigrationPlan(raw, language = "zh") {
           limit: tab.options?.[id2]?.limit || 3,
           ...tab.options?.[id2] || {}
         };
+    if (tab.cards.includes("multiSearch")) {
+      for (const [module2, preferences] of Object.entries(searchOptions))
+        moduleOptions2[module2] = {
+          visible: false,
+          limit: 3,
+          ...moduleOptions2[module2] || {},
+          ...preferences,
+          openAll: tab.options?.multiSearch?.openAll !== false
+        };
+    }
     if (moduleOptions2["habit-checkin"])
       moduleOptions2["habit-checkin"].query = habitSpecs2.slice(0, 8).join(", ");
     if (moduleOptions2.weather && state.weatherPlace)
@@ -65905,7 +66082,7 @@ async function legacyMigrationPlan(raw, language = "zh") {
     ).sort(([a], [b2]) => a.localeCompare(b2)).map(
       ([date, answer]) => `## ${date}
 
-${questions[dailyIndex2(date, questions.length)]}
+${questions[dailyIndex(date, questions.length)]}
 
 ${answer}
 `
@@ -66192,7 +66369,7 @@ function nativeHomeBridge(services, {
   timeout = 5e3,
   translate: translate2 = (zh3, en3) => globalThis.navigator?.language?.startsWith("zh") ? zh3 : en3
 } = {}) {
-  let closed = false, root = "", workspaceRequest = null;
+  let closed = false, root = "", workspaceRequest = null, fileLane = Promise.resolve();
   const waits = /* @__PURE__ */ new Set();
   const requireReady = () => {
     if (closed) throw Error("Home has closed");
@@ -66367,25 +66544,34 @@ function nativeHomeBridge(services, {
       ].filter(Boolean);
       return () => unsubs.forEach((unsubscribe) => unsubscribe());
     },
-    async openFile(relative, { newPane = true } = {}) {
-      if (typeof relative !== "string" || !relative || relative.startsWith("/") || relative.includes("\\") || relative.split("/").some((part) => part === ".." || part.startsWith(".")))
-        throw Error("Invalid Home note path");
-      const workspace = await homeWorkspace();
-      const rows = services.sessions.list.getSnapshot().byId || {};
-      const archived = new Set(
-        services.workspaces.list.getSnapshot().archivedSessionIds || []
-      );
-      let id = (workspace.sessionIds || []).find(
-        (id2) => rows[id2] && !archived.has(id2)
-      );
-      if (!id)
-        id = await services.sessions.create({
-          workspaceId: workspace.workspaceId
+    openFile(relative, { newPane = true, line } = {}) {
+      const run = async () => {
+        if (typeof relative !== "string" || !relative || relative.startsWith("/") || relative.includes("\\") || relative.split("/").some((part) => part === ".." || part.startsWith(".")))
+          throw Error("Invalid Home note path");
+        const workspace = await homeWorkspace();
+        const rows = services.sessions.list.getSnapshot().byId || {};
+        const archived = new Set(
+          services.workspaces.list.getSnapshot().archivedSessionIds || []
+        );
+        let id = (workspace.sessionIds || []).find(
+          (id2) => rows[id2] && !archived.has(id2)
+        );
+        if (!id)
+          id = await services.sessions.create({
+            workspaceId: workspace.workspaceId
+          });
+        const sidebar = await showSession(id);
+        const address = "dsh-resource://file/session/" + encodeURIComponent(id) + "/" + relative.split("/").map(encodeURIComponent).join("/");
+        await sidebar.openResource(address, {
+          preferNewPane: newPane,
+          ...Number.isInteger(line) && line >= 0 ? { params: { line: line + 1 } } : {}
         });
-      const sidebar = await showSession(id);
-      const address = "dsh-resource://file/session/" + encodeURIComponent(id) + "/" + relative.split("/").map(encodeURIComponent).join("/");
-      await sidebar.openResource(address, { preferNewPane: newPane });
-      return { id, address };
+        return { id, address };
+      };
+      const task = fileLane.catch(() => {
+      }).then(run);
+      fileLane = task;
+      return task;
     },
     async compose(prompt, { submit = true } = {}) {
       requireReady();
@@ -66465,7 +66651,7 @@ async function createHomeRuntime(api2, services, { storage = globalThis.localSto
     updateHeader() {
     }
   };
-  async function openNote(file, options = {}) {
+  async function openNote(file, options = {}, newPane = false) {
     assertOpen();
     if (!(file instanceof TFile) || !vault.getFileByPath(file.path))
       throw Error("The Home file no longer exists");
@@ -66477,7 +66663,7 @@ async function createHomeRuntime(api2, services, { storage = globalThis.localSto
       ].slice(0, 200)
     }).catch((error) => new Notice(error.message));
     workspace.trigger("file-open", file);
-    return native.openFile(file.path, { newPane: options.active !== false });
+    return native.openFile(file.path, { newPane, line: options.eState?.line });
   }
   function search(query = "") {
     assertOpen();
@@ -66511,7 +66697,10 @@ async function createHomeRuntime(api2, services, { storage = globalThis.localSto
       }),
       openFile: (file, options) => openNote(file, options)
     })) : [],
-    getLeaf: () => leaf,
+    getLeaf: (mode) => mode ? {
+      ...leaf,
+      openFile: (file, options) => openNote(file, options, true)
+    } : leaf,
     getLeftLeaf: () => explorerLeaf,
     iterateAllLeaves: (fn) => {
       if (opened) fn(leaf);
@@ -66672,6 +66861,9 @@ async function createHomeRuntime(api2, services, { storage = globalThis.localSto
     if (raw && !state.getSnapshot().legacyImported)
       await state.migrate(await legacyMigrationPlan(raw, currentLanguage()));
     assertOpen();
+    if (state.getSnapshot().legacyImported) includeLegacySearchSites();
+    const legacyQuoteShift = state.getSnapshot().compatibility?.legacyState?.quoteShift;
+    app.home.quoteShift = Number.isFinite(legacyQuoteShift) ? Math.trunc(legacyQuoteShift) : 0;
     await vault.sync();
     native.setRoot(vault.root);
     cleanups2.push(
@@ -68471,7 +68663,7 @@ button.qiaomu-update-notes-link:hover { background: var(--background-modifier-ho
 var harness_ui_default = '/* Host tokens and primitives only. Product CSS is copied unchanged from upstream. */\n.qaudio-dsh-surface{\n --text-normal:var(--dsw-alias-label-primary,#262626);--text-muted:var(--dsw-alias-label-secondary,#777);--text-faint:var(--dsw-alias-label-tertiary,#999);\n --background-primary:var(--dsw-alias-bg-base,#fff);--background-secondary:var(--dsw-alias-bg-layer-1,#f6f6f6);--background-modifier-border:var(--dsw-alias-border-main,#e4e4e4);--background-modifier-hover:var(--dsw-alias-interactive-bg-hover,#f4f4f4);\n --font-interface:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-text:var(--font-interface);--font-monospace:ui-monospace,monospace;\n color:var(--text-normal);font-family:var(--font-interface);font-size:14px;line-height:1.5;\n}\n.qaudio-dsh-host,.qaudio-dsh-view{height:100%;min-height:0;overflow:hidden;background:var(--background-primary)}\n.qaudio-dsh-surface *{box-sizing:border-box}\n.qaudio-dsh-surface input,.qaudio-dsh-surface textarea,.qaudio-dsh-surface select,.qaudio-dsh-surface button{font-family:inherit}\n.qaudio-dsh-surface img{max-width:100%}\n.qaudio-dsh-row{display:flex;align-items:center;gap:8px;flex-shrink:0}\n.qaudio-dsh-language{background:transparent;border:0;color:var(--text-muted);font-size:12px;max-width:60px}\n.qaudio-dsh-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px}\n.qaudio-dsh-overlay .modal{position:relative;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);background:var(--background-primary);color:var(--text-normal);border-radius:14px;outline:none;box-shadow:0 24px 80px #0003}\n.qaudio-dsh-overlay .modal-content{min-height:0;min-width:0}\n.qaudio-dsh-overlay .modal-close-button{position:absolute;right:12px;top:12px;z-index:10;display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;color:var(--text-muted);border:0;border-radius:6px;background:transparent;cursor:pointer}\n.qaudio-dsh-overlay .modal-close-button:hover{background:var(--background-modifier-hover)}\n.qaudio-dsh-toast{position:fixed;z-index:1200;right:24px;bottom:24px;max-width:min(480px,90vw);padding:12px 18px;background:#282828;color:#fff;border-radius:10px;box-shadow:0 4px 24px #0002;font:14px/1.5 -apple-system,sans-serif}\n.qaudio-dsh-menu{position:fixed;z-index:1100;min-width:180px;max-width:360px;padding:5px;background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:10px;box-shadow:0 8px 32px #0002}\n.qaudio-dsh-menu-item{display:flex;width:100%;align-items:center;gap:9px;padding:8px 10px;background:none;border:0;border-radius:6px;color:var(--text-normal);text-align:left;font-size:13px;cursor:pointer}\n.qaudio-dsh-menu-item:hover,.qaudio-dsh-menu-item:focus{background:var(--background-modifier-hover);outline:none}\n.qaudio-dsh-menu-item>span:first-child{width:16px;height:16px;display:flex}.qaudio-dsh-menu hr{border:0;border-top:1px solid var(--background-modifier-border);margin:4px}\n.qaudio-dsh-surface .setting-item{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 0;border-bottom:1px solid var(--background-modifier-border)}\n.qaudio-dsh-surface .setting-item-info{flex:1;min-width:0}.qaudio-dsh-surface .setting-item-name{font-size:14px;font-weight:500}.qaudio-dsh-surface .setting-item-description{font-size:12px;color:var(--text-muted);margin-top:4px}.qaudio-dsh-surface .setting-item-control{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:55%}\n.qaudio-dsh-surface .setting-item-control :is(input,select,button){border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary);color:var(--text-normal);padding:6px 10px;max-width:100%;font-size:13px}.qaudio-dsh-surface .setting-item-control button{cursor:pointer;display:flex;align-items:center;gap:6px}.qaudio-dsh-surface .setting-item-control input[type=checkbox]{width:18px;height:18px;accent-color:var(--text-normal)}\n.qaudio-dsh-files{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.qaudio-dsh-surface .qaudio-dsh-editor{min-height:300px}.qaudio-dsh-error{padding:12px;color:#b91c1c}\n@media(max-width:760px){.qaudio-dsh-row{gap:3px}.qaudio-dsh-language{max-width:48px}.qaudio-dsh-surface .setting-item{align-items:flex-start;flex-direction:column}.qaudio-dsh-surface .setting-item-control{max-width:100%}}\n\n.qaudio-dsh-overlay .modal{display:flex;flex-direction:column;padding:24px;overflow:hidden}.qaudio-dsh-overlay .modal-content{flex:1;overflow:auto}.qaudio-dsh-surface{--font-ui-small:13px;--font-ui-smaller:12px;--font-ui-medium:14px;--color-red:var(--dsw-alias-state-error-secondary,#dc2626);--text-success:var(--dsw-alias-state-success-primary,#16a34a);--background-modifier-border:var(--dsw-alias-border-l2,#ddd)}\n';
 
 // src/client/home-boundary.css
-var home_boundary_default = "/* Host dimensions/tokens only; original Home CSS follows its own component layout. */\n.qhome-dsh-host,.qhome-dsh-view,.qhome-dsh-content{height:100%;min-height:0;width:100%;min-width:0;overflow:hidden}\n.qhome-dsh-host,.qaudio-dsh-overlay .qh-ui{--background-primary-alt:var(--background-secondary);--background-modifier-border-focus:var(--text-muted);--interactive-accent:var(--dsw-alias-brand-primary,#5865f2);--text-on-accent:#fff;--interactive-normal:var(--background-secondary);--interactive-hover:var(--background-modifier-hover);--input-height:32px;--radius-s:4px;--radius-m:8px}\n";
+var home_boundary_default = "/* Host dimensions/tokens only; original Home CSS follows its own component layout. */\n.qhome-dsh-host,.qhome-dsh-view,.qhome-dsh-content{height:100%;min-height:0;width:100%;min-width:0;overflow:hidden}\n.qhome-dsh-host,.qaudio-dsh-overlay .qh-ui{--background-primary-alt:var(--background-secondary);--background-modifier-border-focus:var(--text-muted);--interactive-accent:var(--dsw-alias-brand-primary,#5865f2);--text-on-accent:#fff;--interactive-normal:var(--background-secondary);--interactive-hover:var(--background-modifier-hover);--input-height:32px;--radius-s:4px;--radius-m:8px}\n\n.qaudio-dsh-surface [hidden]{display:none!important}\n";
 
 // src/client/locale.js
 init_original_globals();

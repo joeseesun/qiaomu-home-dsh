@@ -1,3 +1,9 @@
+import {
+  includeLegacySearchSites,
+  legacySearchOptions,
+  legacyWallpaper,
+  SEARCH_MODULES,
+} from "./legacy-preferences";
 import { loadState } from "./store.js";
 import { quickNotesMarkdown, DAILY_QUESTIONS, dailyIndex } from "./data.js";
 import { normalizeSettings, sectionKey } from "../original/settings";
@@ -46,6 +52,8 @@ export async function legacyMigrationPlan(raw: string, language = "zh") {
   const prefix = `Imported/Home-0.3/${id}`,
     state = loadState({ getItem: () => raw }),
     files: Array<{ path: string; text: string }> = [];
+  includeLegacySearchSites();
+  const searchOptions = legacySearchOptions(state);
   const settings = normalizeSettings(null);
   settings.homeShortcutsSeeded = true;
   settings.todoDaily = false;
@@ -58,6 +66,7 @@ export async function legacyMigrationPlan(raw: string, language = "zh") {
     state.wallpaperMode === "gradient" ? "none" : "curated";
   settings.wallpaper.rotation =
     state.wallpaperMode === "open" ? "open" : "daily";
+  Object.assign(settings.wallpaper, legacyWallpaper(state) || {});
   settings.countdown = state.countdown;
   settings.dailyFocus = {
     day: state.dailyFocus.date,
@@ -90,7 +99,13 @@ export async function legacyMigrationPlan(raw: string, language = "zh") {
         ? [id]
         : id.startsWith("plugin:")
           ? [sectionKey(id.split(":")[1], id.split(":")[2])]
-          : CARD_MAP[id] || [id];
+          : id === "multiSearch"
+            ? [
+                Object.hasOwn(SEARCH_MODULES, state.searchGroup)
+                  ? SEARCH_MODULES[state.searchGroup]
+                  : "multi-search",
+              ]
+            : CARD_MAP[id] || [id];
   const habitNames: Record<string, string> = Object.create(null);
   const usedNames = new Set<string>();
   const reserved = new Set([
@@ -139,6 +154,16 @@ export async function legacyMigrationPlan(raw: string, language = "zh") {
           limit: tab.options?.[id]?.limit || 3,
           ...(tab.options?.[id] || {}),
         };
+    if (tab.cards.includes("multiSearch")) {
+      for (const [module, preferences] of Object.entries(searchOptions))
+        moduleOptions[module] = {
+          visible: false,
+          limit: 3,
+          ...(moduleOptions[module] || {}),
+          ...preferences,
+          openAll: tab.options?.multiSearch?.openAll !== false,
+        };
+    }
     if (moduleOptions["habit-checkin"])
       moduleOptions["habit-checkin"].query = habitSpecs.slice(0, 8).join(", ");
     if (moduleOptions.weather && state.weatherPlace)

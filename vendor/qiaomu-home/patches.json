@@ -37,6 +37,58 @@
     [
       "L(\"{count} 篇\", \"{count} notes\", { count: day.count })",
       "(app.home?.sessionActivity ? L(\"{count} 个对话\", \"{count} conversations\", { count: day.count }) : L(\"{count} 篇\", \"{count} notes\", { count: day.count }))"
+    ],
+    [
+      "dailyIndex(localDay(), quotes.length, offsets.get(key) ?? 0)",
+      "dailyIndex(localDay(), quotes.length, offsets.get(key) ?? app.home?.quoteShift ?? 0)"
+    ],
+    [
+      "offsets.set(key, (offsets.get(key) ?? 0) + 1); paint(quotes, file);",
+      "offsets.set(key, (offsets.get(key) ?? app.home?.quoteShift ?? 0) + 1); paint(quotes, file);"
+    ],
+    [
+      "L(\"正在播放 · 关闭 Obsidian 或停用插件时停止\", \"Playing · stops when Obsidian closes\")",
+      "L(\"正在播放 · 关闭 Harness 或停用插件时停止\", \"Playing · stops when Harness closes\")"
+    ]
+  ],
+  "src/ecosystem.ts": [
+    [
+      "import type { App, Plugin } from \"obsidian\";",
+      "import type { App, Plugin } from \"obsidian\";\nimport { openHarnessPluginPage } from \"../client/plugin-pages\";"
+    ],
+    [
+      "  window.open(`obsidian://show-plugin?id=${encodeURIComponent(id)}`);",
+      "  openHarnessPluginPage(id);"
+    ],
+    [
+      "repo: \"https://github.com/joeseesun/qiaomu-reader\",",
+      "repo: \"https://github.com/joeseesun/qiaomu-reader-dsh\","
+    ],
+    [
+      "repo: \"https://github.com/joeseesun/qiaomu-ai-rss\",",
+      "repo: \"https://github.com/joeseesun/qiaomu-rss-dsh\","
+    ],
+    [
+      "repo: \"https://github.com/joeseesun/qiaomu-radio\",",
+      "repo: \"https://github.com/joeseesun/qiaomu-radio-dsh\","
+    ],
+    [
+      "在 Obsidian 里读 EPUB、PDF、MOBI，划线直接成为笔记",
+      "在 Harness 里读 EPUB、PDF、MOBI，划线直接成为笔记"
+    ]
+  ],
+  "src/settings-tab.ts": [
+    [
+      "L(\"每次启动 Obsidian，都从主页开始。\", \"Start every Obsidian session on Home.\")",
+      "L(\"每次启动 Harness，都从主页开始。\", \"Start every Harness session on Home.\")"
+    ],
+    [
+      "L(\"代替 Obsidian 的空白新标签页。\", \"Replace Obsidian's empty new tab.\")",
+      "L(\"Harness 没有 Obsidian 的空白标签页。请使用侧栏 Home 或「打开主页」命令。\", \"Harness has no Obsidian-style empty tabs. Use Home in the sidebar or the Open Home command.\")"
+    ],
+    [
+      "toggle.setValue(settings.replaceNewTab).onChange",
+      "toggle.setValue(settings.replaceNewTab).setDisabled(true).onChange"
     ]
   ]
 }

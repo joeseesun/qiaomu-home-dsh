@@ -29,3 +29,6 @@ export { createProviderRegistry } from "./providers.js";
 
 export { createNativeCards, questionSection } from "./native-cards";
 export { HomeSearchModal } from "./home-search";
+
+export { renderExtra } from "../original/extra-ui";
+export { DISCOVERY_MODULES } from "../original/discovery";

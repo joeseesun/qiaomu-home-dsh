@@ -294,10 +294,10 @@ export function renderExtra(parent: HTMLElement, plugin: QiaomuHomePlugin, id: E
     const paint = (quotes: string[], file: TFile | null) => {
       body.empty();
       if (!quotes.length) { message(L("这篇笔记里还没有可用的句子", "No lines to show in this note")); button(body, L("更换来源", "Change source"), configure, "settings-2"); return; }
-      const index = dailyIndex(localDay(), quotes.length, offsets.get(key) ?? 0);
+      const index = dailyIndex(localDay(), quotes.length, offsets.get(key) ?? app.home?.quoteShift ?? 0);
       body.createDiv({ cls: "qh-quote", text: quotes[index] });
       const actions = body.createDiv({ cls: "qh-workflow-actions" });
-      button(actions, L("换一句", "Another"), () => { offsets.set(key, (offsets.get(key) ?? 0) + 1); paint(quotes, file); body.querySelector<HTMLButtonElement>(".qh-workflow-actions button")?.focus(); }, "shuffle");
+      button(actions, L("换一句", "Another"), () => { offsets.set(key, (offsets.get(key) ?? app.home?.quoteShift ?? 0) + 1); paint(quotes, file); body.querySelector<HTMLButtonElement>(".qh-workflow-actions button")?.focus(); }, "shuffle");
       button(actions, L("复制", "Copy"), () => void navigator.clipboard.writeText(quotes[index]).then(() => new Notice(L("已复制", "Copied"))), "copy");
       if (file) button(actions, L("出处", "Source"), () => open(file), "arrow-up-right");
     };
@@ -452,7 +452,7 @@ export function renderExtra(parent: HTMLElement, plugin: QiaomuHomePlugin, id: E
         plugin.settings.ambient = { ...plugin.settings.ambient, volume: Number(volume.value) };
         void plugin.saveSettings({ rerender: false }).catch(() => new Notice(t("layout.saveFailed")));
       });
-      body.createDiv({ cls: "qh-native-scope", text: player.playing ? L("正在播放 · 关闭 Obsidian 或停用插件时停止", "Playing · stops when Obsidian closes") : L("本地生成，无需联网", "Generated locally, no network") });
+      body.createDiv({ cls: "qh-native-scope", text: player.playing ? L("正在播放 · 关闭 Harness 或停用插件时停止", "Playing · stops when Harness closes") : L("本地生成，无需联网", "Generated locally, no network") });
     };
     const unsubscribe = player.onChange(() => { if (card.isConnected) paint(); else unsubscribe(); });
     paint();

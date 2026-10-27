@@ -21,7 +21,7 @@ Target: complete the original Home workflows and use their existing UI in DeepSe
 
 ## Required before release
 
-1. Complete the remaining legacy preference mappings (multi-search group selections/custom templates, wallpaper/quote offsets), and review original-only integrations and new-tab behavior against public Harness APIs.
+1. Review remaining original-only integrations against available Harness capabilities; third-party Obsidian plugins do not become Harness plugins automatically.
 2. Exercise real Harness navigation, commands, scoped local wallpapers, provider lifecycle, keychain pickers, daily-note settings, and live weather/gallery requests.
 3. Visually compare original module workflows, including responsive settings, dialogs, menus, typography and dark theme. The browser is user-controlled; no browser operation or restart is authorized during this pause.
 4. Publish only after applicable checks; download/hash-check the public package, install with backup, and separately verify the installed version. Do not restart the daily Harness while another chat awaits approval.
@@ -41,3 +41,12 @@ The Home provider registry feeds the original plugin-source discovery and adds n
 Legacy scratchpad and daily-question cards use the original native-card factory, input classes and actions. Markdown writes compare the displayed base text plus the Host content hash. Drafts survive card refresh, navigation and reload; external edits are preserved, and conflicts can be saved as a separate Markdown copy. The conversation activity card uses the actual original heatmap renderer with session creation/update times and accurate conversation labels. It is a snapshot of these timestamps, not an invented message-by-message history.
 
 Automated verification includes the built client factory and slot/CSS cleanup, original full Plugin mounting on real temporary Host state, draft conflict/reload/copy, journal history preservation and local search syntax. This is Node/jsdom and real temporary filesystem evidence. No new real Harness runtime, release or installed 0.4.0 is claimed.
+
+
+## Preference and navigation checkpoint
+
+Legacy multi-search groups map to the existing original discovery cards: the active group keeps its position, other groups retain their saved selections as hidden modules available from the library, and custom templates remain editable in the original multi-search settings. Legacy destinations missing from the newer catalog are appended as data to the same renderer. Daily wallpaper selection and quote offsets are preserved. Validated in the migration/renderer tests.
+
+Original task/excerpt note navigation now passes zero-based Obsidian line numbers as one-based public `sidebarRight.openResource(..., { params: { line } })` navigation parameters. Plain and modified clicks retain same-pane/new-pane preference; file navigation is serialized to avoid duplicate sessions and competing pane mounts. The public SDK source confirms document preview consumes `navigation.params.line`; actual Harness behavior still needs runtime validation.
+
+The original empty-Obsidian-tab replacement setting is retained but disabled with a Harness-specific explanation: Harness has no corresponding empty-note-tab surface. Home remains available from the sidebar, original Open Home command and startup preference. Install actions for known Qiaomu ports open their DSH release pages. Unported Obsidian dependencies show an explicit availability notice instead of launching an Obsidian install URI. No functionality of those external plugins is claimed.

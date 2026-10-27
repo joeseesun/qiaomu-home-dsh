@@ -1,3 +1,4 @@
+import { includeLegacySearchSites } from "./legacy-preferences";
 import OriginalPlugin from "../original/main";
 import { HomeView } from "../original/view";
 import { WallpaperCache } from "../original/wallpaper/wallpaper";
@@ -66,7 +67,7 @@ export async function createHomeRuntime(
     },
     updateHeader() {},
   };
-  async function openNote(file: TFile, options: any = {}) {
+  async function openNote(file: TFile, options: any = {}, newPane = false) {
     assertOpen();
     if (!(file instanceof TFile) || !vault.getFileByPath(file.path))
       throw Error("The Home file no longer exists");
@@ -80,7 +81,7 @@ export async function createHomeRuntime(
       })
       .catch((error: Error) => new Notice(error.message));
     workspace.trigger("file-open", file);
-    return native.openFile(file.path, { newPane: options.active !== false });
+    return native.openFile(file.path, { newPane, line: options.eState?.line });
   }
   function search(query = "") {
     assertOpen();
@@ -121,7 +122,14 @@ export async function createHomeRuntime(
                   openNote(file, options),
               }))
             : [],
-    getLeaf: () => leaf,
+    getLeaf: (mode?: any) =>
+      mode
+        ? {
+            ...leaf,
+            openFile: (file: TFile, options: any) =>
+              openNote(file, options, true),
+          }
+        : leaf,
     getLeftLeaf: () => explorerLeaf,
     iterateAllLeaves: (fn: any) => {
       if (opened) fn(leaf);
@@ -301,6 +309,12 @@ export async function createHomeRuntime(
     if (raw && !state.getSnapshot().legacyImported)
       await state.migrate(await legacyMigrationPlan(raw, currentLanguage()));
     assertOpen();
+    if (state.getSnapshot().legacyImported) includeLegacySearchSites();
+    const legacyQuoteShift =
+      state.getSnapshot().compatibility?.legacyState?.quoteShift;
+    app.home.quoteShift = Number.isFinite(legacyQuoteShift)
+      ? Math.trunc(legacyQuoteShift)
+      : 0;
     await vault.sync();
     native.setRoot(vault.root);
     cleanups.push(

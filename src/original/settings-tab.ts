@@ -92,12 +92,12 @@ export class HomeSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName(L("打开方式", "Opening")).setHeading();
     new Setting(containerEl)
       .setName(L("启动时打开主页", "Open on startup"))
-      .setDesc(L("每次启动 Obsidian，都从主页开始。", "Start every Obsidian session on Home."))
+      .setDesc(L("每次启动 Harness，都从主页开始。", "Start every Harness session on Home."))
       .addToggle((toggle) => toggle.setValue(settings.openOnStartup).onChange(async (value) => { settings.openOnStartup = value; await save(false); }));
     new Setting(containerEl)
       .setName(L("新标签页显示主页", "Show Home in new tabs"))
-      .setDesc(L("代替 Obsidian 的空白新标签页。", "Replace Obsidian's empty new tab."))
-      .addToggle((toggle) => toggle.setValue(settings.replaceNewTab).onChange(async (value) => { settings.replaceNewTab = value; await save(false); }));
+      .setDesc(L("Harness 没有 Obsidian 的空白标签页。请使用侧栏 Home 或「打开主页」命令。", "Harness has no Obsidian-style empty tabs. Use Home in the sidebar or the Open Home command."))
+      .addToggle((toggle) => toggle.setValue(settings.replaceNewTab).setDisabled(true).onChange(async (value) => { settings.replaceNewTab = value; await save(false); }));
 
     new Setting(containerEl).setName(L("页签与内容", "Pages and content")).setHeading();
     new Setting(containerEl).setName(L("显示页签", "Show pages")).setDesc(L("关闭后只显示主页，其他页签保留。", "When off, show Home and keep the other pages saved."))

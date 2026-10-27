@@ -1,4 +1,5 @@
 import type { App, Plugin } from "obsidian";
+import { openHarnessPluginPage } from "../client/plugin-pages";
 import { L } from "./i18n";
 
 /** Qiaomu plugins Home knows about. Any other plugin that implements the protocol also appears, just without a recommendation card. */
@@ -17,10 +18,10 @@ export const KNOWN_PLUGINS: KnownPlugin[] = [
   {
     id: "qiaomu-reader",
     name: { zh: "乔木 Reader", en: "Qiaomu Reader" },
-    pitch: { zh: "在 Obsidian 里读 EPUB、PDF、MOBI，划线直接成为笔记", en: "Read EPUB, PDF and MOBI with highlights that become notes" },
+    pitch: { zh: "在 Harness 里读 EPUB、PDF、MOBI，划线直接成为笔记", en: "Read EPUB, PDF and MOBI with highlights that become notes" },
     icon: "book-open",
     openCommand: "qiaomu-reader:open-library",
-    repo: "https://github.com/joeseesun/qiaomu-reader",
+    repo: "https://github.com/joeseesun/qiaomu-reader-dsh",
   },
   {
     id: "qiaomu-ai-rss",
@@ -28,7 +29,7 @@ export const KNOWN_PLUGINS: KnownPlugin[] = [
     pitch: { zh: "AI 改写与翻译的信息流，一键摘进日记", en: "AI-rewritten feeds you can clip into your daily note" },
     icon: "rss",
     openCommand: "qiaomu-ai-rss:open-reader",
-    repo: "https://github.com/joeseesun/qiaomu-ai-rss",
+    repo: "https://github.com/joeseesun/qiaomu-rss-dsh",
   },
   {
     id: "qiaomu-radio",
@@ -36,7 +37,7 @@ export const KNOWN_PLUGINS: KnownPlugin[] = [
     pitch: { zh: "写作时听全球电台，越听越懂你的口味", en: "Live radio from around the world while you write" },
     icon: "radio-tower",
     openCommand: "qiaomu-radio:open-radio",
-    repo: "https://github.com/joeseesun/qiaomu-radio",
+    repo: "https://github.com/joeseesun/qiaomu-radio-dsh",
   },
   {
     id: "qiaomu-agent",
@@ -100,7 +101,7 @@ export function listCommands(app: App): Array<{ id: string; name: string; icon?:
 
 /** Opens the community plugin page in Obsidian's own browser, where the user installs it. Home never installs anything itself. */
 export function openPluginPage(id: string): void {
-  window.open(`obsidian://show-plugin?id=${encodeURIComponent(id)}`);
+  openHarnessPluginPage(id);
 }
 
 /** Opens Settings → Community plugins so the user can switch a plugin on. */

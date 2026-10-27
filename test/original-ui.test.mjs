@@ -868,3 +868,84 @@ test("Home workspace search applies quoted paths, tags, exclusions and OR withou
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("legacy discovery preferences and current daily wallpaper survive the original UI migration", async () => {
+  const { BUILTIN_QUOTES, curatedPhotos, dailyIndex, dayKey } = await import(
+    "../src/client/data.js"
+  );
+  const template = "Personal | https://example.test/search?q={query}";
+  const plan = await ui.legacyMigrationPlan(
+    JSON.stringify({
+      tab: "explore",
+      tabs: [
+        {
+          id: "explore",
+          name: "Discovery",
+          cards: ["multiSearch", "quote"],
+          options: { multiSearch: { openAll: false } },
+        },
+      ],
+      searchGroup: "books",
+      searchEnginesByGroup: {
+        books: ["gutenberg"],
+        web: ["github", "custom:https://example.test/search?q={query}"],
+      },
+      searchTemplates: template,
+      wallpaperMode: "daily",
+      wallpaperShift: 3,
+      quoteShift: 3,
+    }),
+  );
+  const page = plan.settings.pages.find((page) => page.id === "explore");
+  assert(page.moduleOrder.includes("book-finder"));
+  assert.equal(page.moduleOptions["book-finder"].visible, true);
+  assert.deepEqual(page.moduleOptions["book-finder"].sites, ["gutenberg"]);
+  assert.equal(page.moduleOptions["book-finder"].openAll, false);
+  assert.equal(page.moduleOptions["multi-search"].visible, false);
+  assert.deepEqual(page.moduleOptions["multi-search"].sites, [
+    "github",
+    "custom:https://example.test/search?q={query}",
+  ]);
+  assert.deepEqual(page.moduleOptions["multi-search"].customSites, [
+    { name: "Personal", url: "https://example.test/search?q={query}" },
+  ]);
+  assert(
+    ui.DISCOVERY_MODULES["multi-search"].sites.some(
+      (site) => site.id === "github",
+    ),
+  );
+  const photos = curatedPhotos();
+  assert.equal(
+    plan.settings.wallpaper.current.id,
+    photos[dailyIndex(dayKey(), photos.length, 3)].id,
+  );
+  assert.equal(plan.settings.wallpaper.chosenOn, dayKey());
+  const fixture = setup(),
+    container = ui.createEl("div");
+  document.body.append(container);
+  try {
+    fixture.plugin.app.home = { quoteShift: 3 };
+    ui.setLanguage("zh");
+    ui.renderExtra(
+      container,
+      fixture.plugin,
+      "daily-quote",
+      "migrated-quote",
+      () => {},
+    );
+    assert.equal(
+      container.querySelector(".qh-quote").textContent,
+      BUILTIN_QUOTES.zh[dailyIndex(dayKey(), BUILTIN_QUOTES.zh.length, 3)],
+    );
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "换一句")
+      .click();
+    assert.equal(
+      container.querySelector(".qh-quote").textContent,
+      BUILTIN_QUOTES.zh[dailyIndex(dayKey(), BUILTIN_QUOTES.zh.length, 4)],
+    );
+  } finally {
+    container.remove();
+    await fixture.close();
+  }
+});

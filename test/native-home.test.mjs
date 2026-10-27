@@ -130,7 +130,16 @@ test("note opening registers its scoped workspace once, reuses its session, and 
   try {
     bridge.setRoot("/tmp/home-notes");
     await bridge.openFile("Daily/中文.md");
-    await bridge.openFile("Todo.md");
+    await Promise.all([
+      bridge.openFile("Todo.md", { newPane: false, line: 12 }),
+      bridge.openFile("Other.md", { newPane: true, line: 0 }),
+    ]);
+    const files = f.calls.filter((call) => call[0] === "file");
+    assert.deepEqual(files[1][2], {
+      preferNewPane: false,
+      params: { line: 13 },
+    });
+    assert.deepEqual(files[2][2], { preferNewPane: true, params: { line: 1 } });
     assert.equal(f.calls.filter((call) => call[0] === "workspace").length, 1);
     assert.equal(f.calls.filter((call) => call[0] === "create").length, 1);
     assert.equal(

@@ -10,7 +10,8 @@ export function nativeHomeBridge(
 ) {
   let closed = false,
     root = "",
-    workspaceRequest = null;
+    workspaceRequest = null,
+    fileLane = Promise.resolve();
   const waits = new Set();
   const requireReady = () => {
     if (closed) throw Error("Home has closed");
@@ -207,37 +208,47 @@ export function nativeHomeBridge(
       ].filter(Boolean);
       return () => unsubs.forEach((unsubscribe) => unsubscribe());
     },
-    async openFile(relative, { newPane = true } = {}) {
-      if (
-        typeof relative !== "string" ||
-        !relative ||
-        relative.startsWith("/") ||
-        relative.includes("\\") ||
-        relative
-          .split("/")
-          .some((part) => part === ".." || part.startsWith("."))
-      )
-        throw Error("Invalid Home note path");
-      const workspace = await homeWorkspace();
-      const rows = services.sessions.list.getSnapshot().byId || {};
-      const archived = new Set(
-        services.workspaces.list.getSnapshot().archivedSessionIds || [],
-      );
-      let id = (workspace.sessionIds || []).find(
-        (id) => rows[id] && !archived.has(id),
-      );
-      if (!id)
-        id = await services.sessions.create({
-          workspaceId: workspace.workspaceId,
+    openFile(relative, { newPane = true, line } = {}) {
+      const run = async () => {
+        if (
+          typeof relative !== "string" ||
+          !relative ||
+          relative.startsWith("/") ||
+          relative.includes("\\") ||
+          relative
+            .split("/")
+            .some((part) => part === ".." || part.startsWith("."))
+        )
+          throw Error("Invalid Home note path");
+        const workspace = await homeWorkspace();
+        const rows = services.sessions.list.getSnapshot().byId || {};
+        const archived = new Set(
+          services.workspaces.list.getSnapshot().archivedSessionIds || [],
+        );
+        let id = (workspace.sessionIds || []).find(
+          (id) => rows[id] && !archived.has(id),
+        );
+        if (!id)
+          id = await services.sessions.create({
+            workspaceId: workspace.workspaceId,
+          });
+        const sidebar = await showSession(id);
+        const address =
+          "dsh-resource://file/session/" +
+          encodeURIComponent(id) +
+          "/" +
+          relative.split("/").map(encodeURIComponent).join("/");
+        await sidebar.openResource(address, {
+          preferNewPane: newPane,
+          ...(Number.isInteger(line) && line >= 0
+            ? { params: { line: line + 1 } }
+            : {}),
         });
-      const sidebar = await showSession(id);
-      const address =
-        "dsh-resource://file/session/" +
-        encodeURIComponent(id) +
-        "/" +
-        relative.split("/").map(encodeURIComponent).join("/");
-      await sidebar.openResource(address, { preferNewPane: newPane });
-      return { id, address };
+        return { id, address };
+      };
+      const task = fileLane.catch(() => {}).then(run);
+      fileLane = task;
+      return task;
     },
     async compose(prompt, { submit = true } = {}) {
       requireReady();
