@@ -421,3 +421,160 @@ test("all original built-in module renderers mount in one configured page", asyn
     await fixture.close();
   }
 });
+test("legacy Home state migration preserves content, layouts, provider placement, timer and all habit history", async () => {
+  const { HomeHost } = await import("../src/host/home-host.js");
+  const { readFile } = await import("node:fs/promises");
+  const root = await mkdtemp(path.join(tmpdir(), "qhome-legacy-"));
+  const raw = JSON.stringify({
+    headline: "My home",
+    tab: "notes",
+    tabs: [
+      {
+        id: "home",
+        name: "Start",
+        cards: ["todo", "shortcuts", "recent", "plugin:reader:continue"],
+        options: { todo: { limit: 6 } },
+      },
+      {
+        id: "notes",
+        name: "My notes",
+        cards: ["quickNote", "scratchpad", "dailyQuestion", "heatmap", "habit"],
+        options: {},
+      },
+    ],
+    shortcutGroups: [
+      {
+        id: "home-shortcuts",
+        name: "Sites",
+        items: [
+          {
+            id: "docs",
+            url: "https://example.com",
+            label: "Docs",
+            icon: "book",
+          },
+        ],
+      },
+    ],
+    todos: [
+      { id: "a", text: "Keep this task", done: false },
+      { id: "b", text: "Finished task", done: true },
+    ],
+    quickNotes: [
+      {
+        id: "n",
+        time: 1793116800000,
+        text: "Captured thought\nWith a second line",
+      },
+    ],
+    scratchpad: "Private scratchpad\nDo not lose",
+    answers: { "2026-10-27": "Journal answer" },
+    dailyFocus: {
+      date: "2026-10-27",
+      items: [{ text: "Migration", done: true }],
+    },
+    habits: Array.from({ length: 10 }, (_, index) => ({
+      id: "h" + index,
+      name: "Habit " + index,
+      target: index === 0 ? 8 : 1,
+    })),
+    habitLog: Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [
+        "h" + index,
+        { "2026-10-27": index === 0 ? 4 : 1 },
+      ]),
+    ),
+    focus: { minutes: 45, endAt: 1900000000000, remainingMs: 600000 },
+    countdown: { date: "2026-11-01", label: "Launch" },
+    weatherPlace: { name: "Beijing", latitude: 39.9, longitude: 116.4 },
+  });
+  const credentials = { get: async () => "", set: async () => {} };
+  let host = new HomeHost(root, { credentials });
+  try {
+    const plan = await ui.legacyMigrationPlan(raw);
+    assert.equal(plan.settings.customHeadline, "My home");
+    assert.equal(plan.settings.activePageId, "notes");
+    assert.equal(plan.settings.focusSession.endAt, 1900000000000);
+    assert.equal(plan.settings.focusSession.durationMinutes, 45);
+    assert(
+      plan.settings.pages[0].moduleOrder.includes("section:reader:continue"),
+    );
+    assert.equal(
+      plan.settings.pages[0].shortcutGroups[0].items[0].target,
+      "https://example.com/",
+    );
+    assert.equal(plan.settings.pages[0].moduleOptions.todo.limit, 6);
+    assert(plan.settings.pages.some((page) => page.id === "imported-habits-8"));
+    assert.equal(plan.compatibility.legacyState.habits.length, 10);
+    const write = host.workspace.write.bind(host.workspace);
+    let writes = 0;
+    host.workspace.write = async (input) => {
+      if (++writes === 3) throw Error("Simulated disk failure");
+      return write(input);
+    };
+    await assert.rejects(host.migrateLegacy(plan), /Simulated/);
+    assert.equal((await host.load()).legacyImported, false);
+    assert.equal(
+      await readFile(
+        path.join(root, "legacy-home-" + plan.id + ".json"),
+        "utf8",
+      ),
+      raw,
+    );
+    host.dispose();
+    host = new HomeHost(root, { credentials });
+    await host.migrateLegacy(plan);
+    const loaded = await host.load();
+    assert(loaded.legacyImported);
+    assert.equal(
+      (await host.workspace.read(plan.settings.todoPath)).text,
+      "- [ ] Keep this task\n- [x] Finished task\n",
+    );
+    assert(
+      (
+        await host.workspace.read(plan.compatibility.scratchpadPath)
+      ).text.includes("Do not lose"),
+    );
+    assert(
+      (
+        await host.workspace.read(plan.compatibility.questionPath)
+      ).text.includes("Journal answer"),
+    );
+    const daily = await host.workspace.read(
+      plan.daily.folder + "/2026-10-27.md",
+    );
+    assert(daily.text.includes("Habit 9: true"));
+    assert(daily.text.includes("Habit 0: 4"));
+    assert(daily.text.includes("focus_done:"));
+    assert.equal((await host.migrateLegacy(plan)).alreadyImported, true);
+    assert.equal((await host.load()).revision, loaded.revision);
+  } finally {
+    host.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test("legacy habit names incompatible with YAML/card syntax get distinct readable aliases without losing counts", async () => {
+  const habits = ["tags", "focus", "a,b", "a，b", "constructor"].map(
+    (name, index) => ({ id: "h" + index, name, target: 2 }),
+  );
+  const raw = JSON.stringify({
+    habits,
+    habitLog: Object.fromEntries(
+      habits.map((habit) => [habit.id, { "2026-10-27": 1 }]),
+    ),
+  });
+  const plan = await ui.legacyMigrationPlan(raw);
+  const names = Object.values(plan.compatibility.habitNames);
+  assert.equal(new Set(names).size, habits.length);
+  assert(
+    names.every(
+      (name) =>
+        !["tags", "focus", "constructor"].includes(name) && !name.includes(","),
+    ),
+  );
+  const daily = plan.files.find((file) =>
+    file.path.endsWith("/Daily/2026-10-27.md"),
+  );
+  assert(daily);
+  for (const name of names) assert(daily.text.includes(name + ": 1"));
+});

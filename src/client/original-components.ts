@@ -23,3 +23,4 @@ export { captureNote, ensureTodayNote } from "../original/today";
 export { completeTodo, reopenTodo, readTodos } from "../original/todo-data";
 export { writeFocus, readFocus } from "../original/daily-focus";
 export { builtinModules } from "../original/module-catalog";
+export { legacyMigrationPlan } from "./legacy-migration";

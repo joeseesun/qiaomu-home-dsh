@@ -27,3 +27,11 @@ Target: complete the original Home workflows and use their existing UI in DeepSe
 4. Finish scoped local-wallpaper cache, daily-note settings UI and keychain references in the runtime mount. Verify network fixtures and live weather/gallery requests separately.
 5. Run original module workflows and visual comparison in the real Harness. Browser is user-controlled; no browser operation/restart is authorized during this pause.
 6. Publish a release only after applicable checks; download/hash-check the public package, install with backup, and separately verify the installed version. Do not restart the daily Harness while the other chat awaits approval.
+
+## Legacy-data and native-API checkpoint
+
+The legacy migration planner now converts all valid 0.3.0 state into original settings and Markdown, while archiving the exact raw input. It preserves task completion, quick notes, scratchpad, journal answers, page order/options, provider placement, shortcut groups, absolute focus deadlines, daily focus and habit history. More than eight habits receive additional original habit pages; names reserved by YAML/card syntax receive distinct readable aliases with the old names retained in the archive. The Host refuses to overwrite an existing changed import, resumes identical partial imports, and does not repeat completed imports.
+
+Host remote service and matching client descriptors are implemented in `src/host/service.js` / `src/client/home-remote.js`. The client serializes all revision-changing settings, credential-reference and daily-configuration writes. Native navigation uses the local Harness public SDK: `workspaces.create`, `sessions.create`, `uiWorkspace.openSession`, `sidebarRight.openResource`, `uiSession.bindingSource`, and the real `__DSH_DIRECTORY_PICKER__.pick` contract. Note navigation creates/reuses a Home-scoped workspace/session, never submits an AI message, and questions preserve any pre-existing input. These are contract tests against fixture services, not real browser validation.
+
+These pieces are not yet connected to the production entry. Remaining runtime work includes original Plugin lifecycle, native file/workspace/search/command adapters, legacy DSH-specific editable cards and activity data, provider-registry wiring, settings token mapping and actual page mount. No new release or installed runtime is claimed.
