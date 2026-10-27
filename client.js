@@ -42,10 +42,404 @@ __export(client_entry_exports, {
 module.exports = __toCommonJS(client_entry_exports);
 
 // src/client/index.jsx
-var import_react7 = __toESM(require("react"), 1);
+var import_react9 = __toESM(require("react"), 1);
+
+// src/client/original-home/protocol/qiaomu-home.ts
+var MAX_SECTION_ITEMS = 6;
+
+// src/client/original-home/sources.ts
+var PROVIDER_TIMEOUT_MS = 1500;
+function withTimeout(value, ms) {
+  if (!(value instanceof Promise)) return Promise.resolve(value);
+  return new Promise((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error("timeout")), ms);
+    value.then((result) => {
+      globalThis.clearTimeout(timer);
+      resolve(result);
+    }, (error) => {
+      globalThis.clearTimeout(timer);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  });
+}
+function validAction(value) {
+  const action = value;
+  return Boolean(action) && typeof action?.id === "string" && typeof action.label === "string" && typeof action.run === "function";
+}
+function cleanItem(value) {
+  const item = value;
+  if (!item || typeof item.id !== "string" || typeof item.title !== "string" || typeof item.open !== "function") return null;
+  const progress = typeof item.progress === "number" && Number.isFinite(item.progress) ? Math.min(1, Math.max(0, item.progress)) : void 0;
+  const image = typeof item.image === "string" && /^(https:|app:|data:image\/|capacitor:)/.test(item.image) ? item.image : void 0;
+  return {
+    id: item.id,
+    title: item.title,
+    open: item.open.bind(item),
+    ...typeof item.subtitle === "string" && item.subtitle ? { subtitle: item.subtitle } : {},
+    ...typeof item.meta === "string" && item.meta ? { meta: item.meta } : {},
+    ...typeof item.icon === "string" ? { icon: item.icon } : {},
+    ...image ? { image } : {},
+    ...progress !== void 0 ? { progress } : {},
+    ...item.active === true ? { active: true } : {},
+    ...Array.isArray(item.actions) ? { actions: item.actions.filter(validAction).slice(0, 2) } : {}
+  };
+}
+function cleanSections(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    const section = raw;
+    if (!section || typeof section.id !== "string" || typeof section.title !== "string" || !Array.isArray(section.items)) return [];
+    const items = section.items.map(cleanItem).filter((item) => item !== null).slice(0, MAX_SECTION_ITEMS);
+    if (!items.length && typeof section.empty !== "string") return [];
+    return [{
+      id: section.id,
+      title: section.title,
+      items,
+      ...typeof section.empty === "string" ? { empty: section.empty } : {},
+      ...validAction(section.more) ? { more: section.more } : {}
+    }];
+  });
+}
+async function loadSections(provider) {
+  try {
+    return { status: "ready", sections: cleanSections(await withTimeout(provider.sections(), PROVIDER_TIMEOUT_MS)) };
+  } catch (error) {
+    console.warn("Qiaomu Home: a provider failed to load", error);
+    return { status: "error" };
+  }
+}
+function loadActions(provider) {
+  try {
+    const actions = provider.actions?.();
+    return Array.isArray(actions) ? actions.filter(validAction) : [];
+  } catch (error) {
+    console.warn("Qiaomu Home: a provider failed to list actions", error);
+    return [];
+  }
+}
+async function searchProvider(provider, query, limit) {
+  if (typeof provider.search !== "function") return [];
+  try {
+    const items = await withTimeout(provider.search(query, limit), PROVIDER_TIMEOUT_MS);
+    return Array.isArray(items) ? items.map(cleanItem).filter((item) => item !== null).slice(0, limit) : [];
+  } catch (error) {
+    console.warn("Qiaomu Home: a provider search failed", error);
+    return [];
+  }
+}
+
+// src/client/providers.js
+var PART = /^[a-zA-Z0-9_.-]{1,80}$/;
+var isProviderCard = (id) => typeof id === "string" && /^plugin:[a-zA-Z0-9_.-]{1,80}:[a-zA-Z0-9_.-]{1,80}$/.test(id);
+var EMPTY_PROVIDERS = Object.freeze({ sections: [], actions: [], errors: [] });
+var emptyProviderStore = { subscribe: () => () => {
+}, getSnapshot: () => EMPTY_PROVIDERS };
+function createProviderRegistry() {
+  const providers = /* @__PURE__ */ new Map(), listeners = /* @__PURE__ */ new Set();
+  let snapshot = EMPTY_PROVIDERS, closed = false;
+  const publish = () => {
+    if (closed) return;
+    const entries = [...providers.values()];
+    snapshot = { sections: entries.flatMap((p) => p.sections), actions: entries.flatMap((p) => p.actions), errors: entries.filter((p) => p.error).map((p) => p.id) };
+    for (const fn of listeners) fn();
+  };
+  const refresh = async (id) => {
+    const entry = providers.get(id);
+    if (!entry || closed) return;
+    const generation = ++entry.generation;
+    const result = await loadSections(entry.provider);
+    if (closed || providers.get(id) !== entry || entry.generation !== generation) return;
+    entry.error = result.status === "error";
+    if (result.status === "ready") entry.sections = result.sections.filter((s) => PART.test(s.id)).map((section) => ({ ...section, sourceId: id, cardId: `plugin:${id}:${section.id}`, description: entry.label }));
+    entry.actions = loadActions(entry.provider).slice(0, 12).map((action) => ({ ...action, sourceId: id }));
+    publish();
+  };
+  return {
+    protocol: "qiaomu-home",
+    version: 1,
+    getSnapshot: () => snapshot,
+    subscribe(fn) {
+      if (closed) return () => {
+      };
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    register(id, provider, { label = id } = {}) {
+      if (closed) throw Error("Home provider registry is disposed");
+      if (!PART.test(id) || provider?.protocol !== "qiaomu-home" || provider.version !== 1 || typeof provider.sections !== "function") throw Error("Invalid Home provider");
+      if (providers.has(id)) throw Error("Home provider already registered");
+      const entry = { id, label, provider, sections: [], actions: [], generation: 0, error: false, cleanup: null };
+      providers.set(id, entry);
+      let active = true;
+      const unregister = () => {
+        if (!active) return;
+        active = false;
+        try {
+          entry.cleanup?.();
+        } finally {
+          if (providers.get(id) === entry) {
+            providers.delete(id);
+            publish();
+          }
+        }
+      };
+      entry.unregister = unregister;
+      try {
+        entry.cleanup = typeof provider.subscribe === "function" ? provider.subscribe(() => void refresh(id)) : null;
+      } catch (error) {
+        providers.delete(id);
+        throw error;
+      }
+      void refresh(id);
+      return unregister;
+    },
+    changed: refresh,
+    async refresh() {
+      await Promise.all([...providers.keys()].map(refresh));
+    },
+    async search(query, limit = 8, signal) {
+      if (closed || signal?.aborted) return [];
+      limit = Math.max(0, Math.min(8, Number.isFinite(limit) ? Math.floor(limit) : 8));
+      const all = await Promise.all([...providers].map(async ([sourceId, entry]) => {
+        const items = await searchProvider(entry.provider, query, limit);
+        if (closed || providers.get(sourceId) !== entry) return [];
+        return items.map((item) => ({ ...item, sourceId, sessionId: `plugin:${sourceId}:${item.id}`, snippet: item.subtitle || "", providerItem: true }));
+      }));
+      return signal?.aborted ? [] : all.flat().slice(0, limit);
+    },
+    dispose() {
+      if (closed) return;
+      closed = true;
+      for (const entry of [...providers.values()]) {
+        try {
+          entry.unregister();
+        } catch {
+        }
+      }
+      providers.clear();
+      listeners.clear();
+      snapshot = EMPTY_PROVIDERS;
+    }
+  };
+}
+
+// src/client/provider-css.js
+var PROVIDER_CSS = '@scope (.qh-provider-card){\n.qh-list {\n  display: flex;\n  flex-direction: column;\n}\n\n.qh-item {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  margin: 0 -6px;\n  padding: 7px 6px;\n  border-radius: 10px;\n  cursor: pointer;\n}\n\n.qh-item:hover {\n  background: var(--qh-hover);\n}\n\n.qh-item:focus-visible {\n  outline: none;\n  box-shadow: 0 0 0 2px var(--qh-focus);\n}\n\n.qh-item-static {\n  cursor: default;\n}\n\n.qh-item-static:hover {\n  background: none;\n}\n\n.qh-thumb {\n  display: grid;\n  flex: none;\n  width: 38px;\n  height: 38px;\n  overflow: hidden;\n  place-items: center;\n  border-radius: 9px;\n  background: var(--qh-hover);\n  color: var(--qh-muted);\n}\n\n.qh-thumb svg {\n  width: 17px;\n  height: 17px;\n}\n\n.qh-thumb img {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n}\n\n.qh-card[data-source="qiaomu-reader"] .qh-thumb {\n  width: 32px;\n  height: 46px;\n  border-radius: 4px;\n}\n\n.qh-item.is-active .qh-thumb {\n  box-shadow: 0 0 0 2px var(--qh-live);\n}\n\n.qh-item-body {\n  flex: 1;\n  min-width: 0;\n}\n\n.qh-item-title,\n.qh-item-sub {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.qh-item-title {\n  color: var(--qh-text);\n  font-size: 14px;\n}\n\n.qh-item-sub {\n  margin-top: 2px;\n  color: var(--qh-faint);\n  font-size: 12px;\n}\n\n.qh-progress {\n  height: 3px;\n  margin-top: 6px;\n  overflow: hidden;\n  border-radius: 3px;\n  background: var(--qh-border);\n}\n\n.qh-progress-fill {\n  height: 100%;\n  border-radius: 3px;\n  background: var(--qh-muted);\n}\n\n.qh-icon-button {\n  display: inline-flex;\n  flex: none;\n  align-items: center;\n  gap: 4px;\n  height: auto;\n  padding: 6px;\n  border: none;\n  border-radius: 8px;\n  background: none;\n  box-shadow: none;\n  color: var(--qh-muted);\n  font-size: 12px;\n  font-weight: 500;\n  cursor: pointer;\n}\n\n.qh-icon-button:hover {\n  background: var(--qh-hover);\n  color: var(--qh-text);\n}\n\n.qh-icon-button:focus-visible {\n  outline: none;\n  box-shadow: 0 0 0 2px var(--qh-focus);\n}\n\n.qh-button-icon {\n  display: flex;\n}\n\n.qh-icon-button svg {\n  width: 16px;\n  height: 16px;\n}\n\n.qh-card-more {\n  margin-right: -6px;\n}\n\n\n}\n.qh-provider-card{--qh-hover:rgba(255,255,255,.06);--qh-muted:var(--qh-text-2);--qh-faint:var(--qh-text-3);--qh-border:var(--qh-card-border);--qh-focus:var(--qh-accent);--qh-live:var(--qh-accent)}';
 
 // src/client/page.jsx
-var import_react6 = __toESM(require("react"), 1);
+var import_react8 = __toESM(require("react"), 1);
+
+// src/client/provider-icons.jsx
+var import_react2 = __toESM(require("react"), 1);
+
+// src/client/icons.jsx
+var import_react = __toESM(require("react"), 1);
+var import_jsx_runtime = require("react/jsx-runtime");
+function makeIcon(paths, { filled = false } = {}) {
+  function Icon({ size = 16, strokeWidth = 1.8, className }) {
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      "svg",
+      {
+        width: size,
+        height: size,
+        viewBox: "0 0 24 24",
+        fill: filled ? "currentColor" : "none",
+        stroke: filled ? "none" : "currentColor",
+        strokeWidth,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        className,
+        children: paths.map((d, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d }, index))
+      }
+    );
+  }
+  Icon.displayName = "QhIcon";
+  return Icon;
+}
+var IconHome = makeIcon([
+  "M3 10.5 12 3l9 7.5",
+  "M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"
+]);
+var IconSearch = makeIcon(["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.3-4.3"]);
+var IconPlus = makeIcon(["M12 5v14", "M5 12h14"]);
+var IconSettings = makeIcon([
+  "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+  "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
+]);
+var IconFolder = makeIcon([
+  "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+]);
+var IconGlobe = makeIcon([
+  "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
+  "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20",
+  "M2 12h20"
+]);
+var IconCheck = makeIcon(["M20 6 9 17l-5-5"]);
+var IconTrash = makeIcon([
+  "M3 6h18",
+  "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
+  "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+]);
+var IconPlay = makeIcon(["m6 4 14 8-14 8V4z"]);
+var IconPause = makeIcon(["M8 4v16", "M16 4v16"]);
+var IconRefresh = makeIcon([
+  "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
+  "M21 3v5h-5",
+  "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
+  "M3 21v-5h5"
+]);
+var IconList = makeIcon(["M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01"]);
+var IconClock = makeIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"]);
+var IconQuote = makeIcon([
+  "M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z",
+  "M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"
+]);
+var IconSun = makeIcon([
+  "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+  "M12 2v2",
+  "M12 20v2",
+  "m4.93 4.93 1.41 1.41",
+  "m17.66 17.66 1.41 1.41",
+  "M2 12h2",
+  "M20 12h2",
+  "m6.34 17.66-1.41 1.41",
+  "m19.07 4.93-1.41 1.41"
+]);
+var IconCloud = makeIcon(["M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"]);
+var IconCloudSun = makeIcon([
+  "M12 2v2",
+  "m4.93 4.93 1.41 1.41",
+  "M20 12h2",
+  "m19.07 4.93-1.41 1.41",
+  "M15.947 12.65a4 4 0 0 0-5.925-4.128",
+  "M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"
+]);
+var IconCloudRain = makeIcon([
+  "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242",
+  "M16 14v6",
+  "M8 14v6",
+  "M12 16v6"
+]);
+var IconCloudSnow = makeIcon([
+  "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242",
+  "M8 15h.01",
+  "M8 19h.01",
+  "M12 17h.01",
+  "M12 21h.01",
+  "M16 15h.01",
+  "M16 19h.01"
+]);
+var IconCloudFog = makeIcon([
+  "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242",
+  "M6 19h12",
+  "M8 22h8"
+]);
+var IconCloudLightning = makeIcon([
+  "M6 16.326A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.973",
+  "m13 12-3 5h4l-3 5"
+]);
+var IconExternal = makeIcon([
+  "M15 3h6v6",
+  "M10 14 21 3",
+  "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+]);
+var IconImage = makeIcon([
+  "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
+  "M8.5 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+  "m21 15-5-5L5 21"
+]);
+var IconMessage = makeIcon(["M7.9 20A9 9 0 1 0 4 16.1L2 22Z"]);
+var IconClose = makeIcon(["M18 6 6 18", "m6 6 12 12"]);
+var IconTimer = makeIcon([
+  "M10 2h4",
+  "M12 14v-4",
+  "M4.93 4.93l2.83 2.83",
+  "M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"
+]);
+var IconGauge = makeIcon([
+  "m12 14 4-4",
+  "M3.34 19a10 10 0 1 1 17.32 0"
+]);
+var IconLink = makeIcon([
+  "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71",
+  "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+]);
+var IconCalendar = makeIcon([
+  "M8 2v4",
+  "M16 2v4",
+  "M19 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Z",
+  "M3 10h18"
+]);
+var IconFlame = makeIcon([
+  "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+]);
+var IconHourglass = makeIcon([
+  "M5 22h14",
+  "M5 2h14",
+  "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22",
+  "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"
+]);
+var IconGrid = makeIcon([
+  "M3 3h7v7H3z",
+  "M14 3h7v7h-7z",
+  "M14 14h7v7h-7z",
+  "M3 14h7v7H3z"
+]);
+var IconPen = makeIcon([
+  "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z",
+  "m15 5 4 4"
+]);
+var IconNotebook = makeIcon([
+  "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"
+]);
+var IconWaves = makeIcon([
+  "M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1",
+  "M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1",
+  "M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"
+]);
+var IconHelpCircle = makeIcon([
+  "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
+  "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3",
+  "M12 17h.01"
+]);
+var IconCopy = makeIcon([
+  "M9 9h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2Z",
+  "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+]);
+var IconTarget = makeIcon([
+  "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
+  "M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12z",
+  "M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
+]);
+var IconZap = makeIcon(["M13 2 3 14h9l-1 8 10-12h-9l1-8z"]);
+var IconMore = makeIcon(["M12 12h.01", "M19 12h.01", "M5 12h.01"]);
+var IconGrip = makeIcon(["M9 5h.01", "M9 12h.01", "M9 19h.01", "M15 5h.01", "M15 12h.01", "M15 19h.01"]);
+var IconArrowUp = makeIcon(["m5 12 7-7 7 7", "M12 19V5"]);
+var IconArrowDown = makeIcon(["M12 5v14", "m19 12-7 7-7-7"]);
+var IconArrowLeft = makeIcon(["m12 19-7-7 7-7", "M19 12H5"]);
+var IconArrowRight = makeIcon(["M5 12h14", "m12 5 7 7-7 7"]);
+var IconBriefcase = makeIcon(["M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16", "M20 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2Z"]);
+var IconBook = makeIcon(["M12 7v14", "M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"]);
+var IconCompass = makeIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "m16.24 7.76-1.8 5.4a2 2 0 0 1-1.28 1.28l-5.4 1.8 1.8-5.4a2 2 0 0 1 1.28-1.28z"]);
+var IconSquareDashed = makeIcon(["M5 3a2 2 0 0 0-2 2", "M19 3a2 2 0 0 1 2 2", "M21 19a2 2 0 0 1-2 2", "M5 21a2 2 0 0 1-2-2", "M9 3h1", "M9 21h1", "M14 3h1", "M14 21h1", "M3 9v1", "M21 9v1", "M3 14v1", "M21 14v1"]);
+var IconMinusCircle = makeIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M8 12h8"]);
+var IconPanels = makeIcon(["M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z", "M3 9h18", "M9 21V9"]);
+var IconSliders = makeIcon(["M4 21v-7", "M4 10V3", "M12 21v-9", "M12 8V3", "M20 21v-5", "M20 12V3", "M2 14h4", "M10 8h4", "M18 16h4"]);
+
+// src/client/provider-icons.jsx
+var import_jsx_runtime2 = require("react/jsx-runtime");
+var ICONS = { "layout-grid": IconGrid, image: IconImage, book: IconBook, "book-open": IconBook, "book-plus": IconBook, radio: IconWaves, rss: IconGlobe, play: IconPlay, pause: IconPause, plus: IconPlus, search: IconSearch, "file-text": IconNotebook, microphone: IconWaves, mic: IconWaves, settings: IconSettings, "arrow-right": IconArrowRight, "external-link": IconExternal, "audio-lines": IconWaves };
+function ProviderIcon({ name, size = 16 }) {
+  const Icon = ICONS[name] || IconGrid;
+  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Icon, { size });
+}
+
+// src/client/provider-card.jsx
+var import_react4 = __toESM(require("react"), 1);
+
+// src/client/cards.jsx
+var import_react3 = __toESM(require("react"), 1);
 
 // src/client/data.js
 var CURATED = [
@@ -572,204 +966,6 @@ function heatIntensity(count, max) {
   return Math.min(4, Math.max(1, Math.ceil(count / max * 4)));
 }
 
-// src/client/cards.jsx
-var import_react2 = __toESM(require("react"), 1);
-
-// src/client/icons.jsx
-var import_react = __toESM(require("react"), 1);
-var import_jsx_runtime = require("react/jsx-runtime");
-function makeIcon(paths, { filled = false } = {}) {
-  function Icon({ size = 16, strokeWidth = 1.8, className }) {
-    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-      "svg",
-      {
-        width: size,
-        height: size,
-        viewBox: "0 0 24 24",
-        fill: filled ? "currentColor" : "none",
-        stroke: filled ? "none" : "currentColor",
-        strokeWidth,
-        strokeLinecap: "round",
-        strokeLinejoin: "round",
-        "aria-hidden": "true",
-        className,
-        children: paths.map((d, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d }, index))
-      }
-    );
-  }
-  Icon.displayName = "QhIcon";
-  return Icon;
-}
-var IconHome = makeIcon([
-  "M3 10.5 12 3l9 7.5",
-  "M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"
-]);
-var IconSearch = makeIcon(["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.3-4.3"]);
-var IconPlus = makeIcon(["M12 5v14", "M5 12h14"]);
-var IconSettings = makeIcon([
-  "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
-  "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
-]);
-var IconFolder = makeIcon([
-  "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
-]);
-var IconGlobe = makeIcon([
-  "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
-  "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20",
-  "M2 12h20"
-]);
-var IconCheck = makeIcon(["M20 6 9 17l-5-5"]);
-var IconTrash = makeIcon([
-  "M3 6h18",
-  "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
-  "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-]);
-var IconPlay = makeIcon(["m6 4 14 8-14 8V4z"]);
-var IconPause = makeIcon(["M8 4v16", "M16 4v16"]);
-var IconRefresh = makeIcon([
-  "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",
-  "M21 3v5h-5",
-  "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",
-  "M3 21v-5h5"
-]);
-var IconList = makeIcon(["M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01"]);
-var IconClock = makeIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"]);
-var IconQuote = makeIcon([
-  "M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z",
-  "M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"
-]);
-var IconSun = makeIcon([
-  "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
-  "M12 2v2",
-  "M12 20v2",
-  "m4.93 4.93 1.41 1.41",
-  "m17.66 17.66 1.41 1.41",
-  "M2 12h2",
-  "M20 12h2",
-  "m6.34 17.66-1.41 1.41",
-  "m19.07 4.93-1.41 1.41"
-]);
-var IconCloud = makeIcon(["M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"]);
-var IconCloudSun = makeIcon([
-  "M12 2v2",
-  "m4.93 4.93 1.41 1.41",
-  "M20 12h2",
-  "m19.07 4.93-1.41 1.41",
-  "M15.947 12.65a4 4 0 0 0-5.925-4.128",
-  "M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"
-]);
-var IconCloudRain = makeIcon([
-  "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242",
-  "M16 14v6",
-  "M8 14v6",
-  "M12 16v6"
-]);
-var IconCloudSnow = makeIcon([
-  "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242",
-  "M8 15h.01",
-  "M8 19h.01",
-  "M12 17h.01",
-  "M12 21h.01",
-  "M16 15h.01",
-  "M16 19h.01"
-]);
-var IconCloudFog = makeIcon([
-  "M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242",
-  "M6 19h12",
-  "M8 22h8"
-]);
-var IconCloudLightning = makeIcon([
-  "M6 16.326A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.973",
-  "m13 12-3 5h4l-3 5"
-]);
-var IconExternal = makeIcon([
-  "M15 3h6v6",
-  "M10 14 21 3",
-  "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
-]);
-var IconImage = makeIcon([
-  "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
-  "M8.5 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
-  "m21 15-5-5L5 21"
-]);
-var IconMessage = makeIcon(["M7.9 20A9 9 0 1 0 4 16.1L2 22Z"]);
-var IconClose = makeIcon(["M18 6 6 18", "m6 6 12 12"]);
-var IconTimer = makeIcon([
-  "M10 2h4",
-  "M12 14v-4",
-  "M4.93 4.93l2.83 2.83",
-  "M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"
-]);
-var IconGauge = makeIcon([
-  "m12 14 4-4",
-  "M3.34 19a10 10 0 1 1 17.32 0"
-]);
-var IconLink = makeIcon([
-  "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71",
-  "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
-]);
-var IconCalendar = makeIcon([
-  "M8 2v4",
-  "M16 2v4",
-  "M19 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Z",
-  "M3 10h18"
-]);
-var IconFlame = makeIcon([
-  "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
-]);
-var IconHourglass = makeIcon([
-  "M5 22h14",
-  "M5 2h14",
-  "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22",
-  "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"
-]);
-var IconGrid = makeIcon([
-  "M3 3h7v7H3z",
-  "M14 3h7v7h-7z",
-  "M14 14h7v7h-7z",
-  "M3 14h7v7H3z"
-]);
-var IconPen = makeIcon([
-  "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z",
-  "m15 5 4 4"
-]);
-var IconNotebook = makeIcon([
-  "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"
-]);
-var IconWaves = makeIcon([
-  "M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1",
-  "M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1",
-  "M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"
-]);
-var IconHelpCircle = makeIcon([
-  "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
-  "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3",
-  "M12 17h.01"
-]);
-var IconCopy = makeIcon([
-  "M9 9h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2Z",
-  "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-]);
-var IconTarget = makeIcon([
-  "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
-  "M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12z",
-  "M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
-]);
-var IconZap = makeIcon(["M13 2 3 14h9l-1 8 10-12h-9l1-8z"]);
-var IconMore = makeIcon(["M12 12h.01", "M19 12h.01", "M5 12h.01"]);
-var IconGrip = makeIcon(["M9 5h.01", "M9 12h.01", "M9 19h.01", "M15 5h.01", "M15 12h.01", "M15 19h.01"]);
-var IconArrowUp = makeIcon(["m5 12 7-7 7 7", "M12 19V5"]);
-var IconArrowDown = makeIcon(["M12 5v14", "m19 12-7 7-7-7"]);
-var IconArrowLeft = makeIcon(["m12 19-7-7 7-7", "M19 12H5"]);
-var IconArrowRight = makeIcon(["M5 12h14", "m12 5 7 7-7 7"]);
-var IconBriefcase = makeIcon(["M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16", "M20 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2Z"]);
-var IconBook = makeIcon(["M12 7v14", "M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"]);
-var IconCompass = makeIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "m16.24 7.76-1.8 5.4a2 2 0 0 1-1.28 1.28l-5.4 1.8 1.8-5.4a2 2 0 0 1 1.28-1.28z"]);
-var IconSquareDashed = makeIcon(["M5 3a2 2 0 0 0-2 2", "M19 3a2 2 0 0 1 2 2", "M21 19a2 2 0 0 1-2 2", "M5 21a2 2 0 0 1-2-2", "M9 3h1", "M9 21h1", "M14 3h1", "M14 21h1", "M3 9v1", "M21 9v1", "M3 14v1", "M21 14v1"]);
-var IconMinusCircle = makeIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M8 12h8"]);
-var IconPanels = makeIcon(["M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z", "M3 9h18", "M9 21V9"]);
-var IconSliders = makeIcon(["M4 21v-7", "M4 10V3", "M12 21v-9", "M12 8V3", "M20 21v-5", "M20 12V3", "M2 14h4", "M10 8h4", "M18 16h4"]);
-
 // src/client/shortcuts.js
 var DEFAULT_GROUP_ID = "home-shortcuts";
 var FAVICON = "favicon";
@@ -784,7 +980,7 @@ var groupIdOf = (cardId) => {
 var isGroupCard = (cardId) => groupIdOf(cardId) !== null;
 var newId = (prefix) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 var cleanIcon = (value) => value === FAVICON || SHORTCUT_ICONS.includes(value) ? value : FAVICON;
-function cleanItem(raw) {
+function cleanItem2(raw) {
   if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || !raw.id) return null;
   const url = normalizeUrl(raw.url);
   if (!url) return null;
@@ -798,11 +994,11 @@ function normalizeGroups(raw, legacyItems = []) {
     if (!entry || typeof entry !== "object" || typeof entry.id !== "string" || !GROUP_ID_RE.test(entry.id) || seen.has(entry.id)) continue;
     seen.add(entry.id);
     const ids = /* @__PURE__ */ new Set();
-    const items = (Array.isArray(entry.items) ? entry.items : []).map(cleanItem).filter((item) => item && !ids.has(item.id) && ids.add(item.id));
+    const items = (Array.isArray(entry.items) ? entry.items : []).map(cleanItem2).filter((item) => item && !ids.has(item.id) && ids.add(item.id));
     groups.push({ id: entry.id, name: typeof entry.name === "string" ? entry.name.trim().slice(0, 40) : "", items });
   }
   if (!seen.has(DEFAULT_GROUP_ID)) {
-    const items = (Array.isArray(legacyItems) ? legacyItems : []).map(cleanItem).filter(Boolean);
+    const items = (Array.isArray(legacyItems) ? legacyItems : []).map(cleanItem2).filter(Boolean);
     groups.unshift({ id: DEFAULT_GROUP_ID, name: "", items });
   }
   return groups;
@@ -920,7 +1116,7 @@ var CARD_CATALOG = [
 ].map((card) => ({ ...card, titleKey: `card.${card.id}`, descKey: `card.${card.id}.desc` }));
 var CARD_BY_ID = new Map(CARD_CATALOG.map((card) => [card.id, card]));
 var CARD_IDS = new Set(CARD_BY_ID.keys());
-var isKnownCard = (id) => CARD_IDS.has(id) || isGroupCard(id);
+var isKnownCard = (id) => CARD_IDS.has(id) || isGroupCard(id) || isProviderCard(id);
 var cardMeta = (id) => CARD_BY_ID.get(id);
 function cardTitle(id, t, groups = []) {
   const groupId = groupIdOf(id);
@@ -1128,8 +1324,8 @@ function edgeScrollSpeed(y, top, bottom) {
 var tabName = (tab, t) => tab.name || t(tab.labelKey);
 
 // src/client/cards.jsx
-var import_jsx_runtime2 = require("react/jsx-runtime");
-var { useEffect, useMemo, useRef, useState } = import_react2.default;
+var import_jsx_runtime3 = require("react/jsx-runtime");
+var { useEffect, useMemo, useRef, useState } = import_react3.default;
 function useNow(intervalMs = 3e4) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1138,15 +1334,15 @@ function useNow(intervalMs = 3e4) {
   }, [intervalMs]);
   return now;
 }
-var CardChromeContext = import_react2.default.createContext(null);
-function Card({ icon: Icon, title, count, actions, children }) {
-  const chrome = import_react2.default.useContext(CardChromeContext);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("section", { className: "qh-card", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("header", { className: "qh-card-head", children: [
+var CardChromeContext = import_react3.default.createContext(null);
+function Card({ icon: Icon, title, count, actions, children, sourceId }) {
+  const chrome = import_react3.default.useContext(CardChromeContext);
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("section", { className: "qh-card", "data-source": sourceId, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("header", { className: "qh-card-head", children: [
       chrome?.handle,
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Icon, { size: 15 }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-card-title", children: title }),
-      count ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-card-count", children: count }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Icon, { size: 15 }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-card-title", children: title }),
+      count ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-card-count", children: count }) : null,
       actions,
       chrome?.menu
     ] }),
@@ -1167,8 +1363,8 @@ function TodoCard({ t, state, setState, limit = 6 }) {
     setDraft("");
     inputRef.current?.focus();
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(Card, { icon: IconList, title: t("card.todo"), count: open > 0 ? t("todo.remaining", { count: open }) : "", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(Card, { icon: IconList, title: t("card.todo"), count: open > 0 ? t("todo.remaining", { count: open }) : "", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
       "form",
       {
         className: "qh-todo-form",
@@ -1177,7 +1373,7 @@ function TodoCard({ t, state, setState, limit = 6 }) {
           submit();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
             "input",
             {
               ref: inputRef,
@@ -1188,39 +1384,39 @@ function TodoCard({ t, state, setState, limit = 6 }) {
               onChange: (event) => setDraft(event.target.value)
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlus, { size: 15 }) })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlus, { size: 15 }) })
         ]
       }
     ),
-    todos.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("todo.empty") }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-todo-list", children: (showAll ? todos : todos.slice(0, limit)).map((todo) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: `qh-todo-item${todo.done ? " qh-done" : ""}`, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    todos.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("todo.empty") }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-todo-list", children: (showAll ? todos : todos.slice(0, limit)).map((todo) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: `qh-todo-item${todo.done ? " qh-done" : ""}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "button",
         {
           type: "button",
           className: "qh-todo-check",
           "aria-pressed": todo.done,
           onClick: () => setState({ todos: toggleTodo(todos, todo.id) }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconCheck, { size: 11, strokeWidth: 2.6 })
+          children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconCheck, { size: 11, strokeWidth: 2.6 })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-todo-text", children: todo.text }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-todo-text", children: todo.text }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "button",
         {
           type: "button",
           className: "qh-todo-del",
           "aria-label": t("action.remove", { name: todo.text }),
           onClick: () => setState({ todos: removeTodo(todos, todo.id) }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconClose, { size: 12 })
+          children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconClose, { size: 12 })
         }
       )
     ] }, todo.id)) }),
-    todos.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("footer", { className: "qh-card-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: open === 0 ? t("todo.allDone") : t("todo.remaining", { count: open }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: { flex: 1 } }),
-      todos.length > limit ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", "aria-expanded": showAll, onClick: () => setShowAll((value) => !value), children: showAll ? t("quickNote.showLess") : t("quickNote.showAll", { count: todos.length }) }) : null,
-      todos.some((todo) => todo.done) ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setState({ todos: clearDoneTodos(todos) }), children: t("todo.clearDone") }) : null
+    todos.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("footer", { className: "qh-card-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: open === 0 ? t("todo.allDone") : t("todo.remaining", { count: open }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
+      todos.length > limit ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", "aria-expanded": showAll, onClick: () => setShowAll((value) => !value), children: showAll ? t("quickNote.showLess") : t("quickNote.showAll", { count: todos.length }) }) : null,
+      todos.some((todo) => todo.done) ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setState({ todos: clearDoneTodos(todos) }), children: t("todo.clearDone") }) : null
     ] }) : null
   ] });
 }
@@ -1248,17 +1444,17 @@ function RecentCard({ t, services, limit = 5 }) {
   const archived = services.workspaces?.list?.getSnapshot?.().archivedSessionIds ?? [];
   const items = useMemo(() => recentSessions(list, archived, limit), [list, archived, limit]);
   const open = (id) => services.uiWorkspace?.openSession?.(id);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Card, { icon: IconMessage, title: t("card.recent"), children: items.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("recent.empty") }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-btn qh-accent", onClick: () => services.uiWorkspace?.startSession?.(), children: t("recent.new") }) })
-  ] }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { children: items.map((row) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "qh-session-row", onClick: () => open(row.id), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconMessage, { size: 14 }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-session-title", children: row.title?.trim() || t("recent.untitled") }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-session-time", children: timeLabel(t, row.updatedAt ?? 0, now) })
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Card, { icon: IconMessage, title: t("card.recent"), children: items.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("recent.empty") }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-btn qh-accent", onClick: () => services.uiWorkspace?.startSession?.(), children: t("recent.new") }) })
+  ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { children: items.map((row) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "qh-session-row", onClick: () => open(row.id), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconMessage, { size: 14 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-session-title", children: row.title?.trim() || t("recent.untitled") }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-session-time", children: timeLabel(t, row.updatedAt ?? 0, now) })
   ] }, row.id)) }) });
 }
 function useExternalStore(subscribe, getSnapshot) {
-  return import_react2.default.useSyncExternalStore(
+  return import_react3.default.useSyncExternalStore(
     subscribe ?? (() => () => {
     }),
     getSnapshot,
@@ -1281,18 +1477,18 @@ var TILE_ICONS = {
 };
 function TileIcon({ item }) {
   const [failed, setFailed] = useState(false);
-  if (item.kind === "session") return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlus, { size: 18 });
-  if (item.kind === "workspace") return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconFolder, { size: 18 });
+  if (item.kind === "session") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlus, { size: 18 });
+  if (item.kind === "workspace") return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconFolder, { size: 18 });
   const Custom = item.icon && item.icon !== FAVICON ? TILE_ICONS[item.icon] : null;
-  if (Custom) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Custom, { size: 18 });
+  if (Custom) return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Custom, { size: 18 });
   const icon = !failed && item.url ? faviconUrl(item.url) : null;
   if (icon) {
-    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("img", { src: icon, alt: "", loading: "lazy", onError: () => setFailed(true) });
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("img", { src: icon, alt: "", loading: "lazy", onError: () => setFailed(true) });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconGlobe, { size: 18 });
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconGlobe, { size: 18 });
 }
 function ShortcutGroupCard({ t, state, setState, services, groupId = DEFAULT_GROUP_ID }) {
-  const chrome = import_react2.default.useContext(CardChromeContext);
+  const chrome = import_react3.default.useContext(CardChromeContext);
   const group = state.shortcutGroups.find((entry) => entry.id === groupId);
   const dragging = useRef(null);
   const [marker, setMarker] = useState(null);
@@ -1357,14 +1553,14 @@ function ShortcutGroupCard({ t, state, setState, services, groupId = DEFAULT_GRO
       update(reorderItem(state.shortcutGroups, groupId, from, item.id, after));
     }
   } : {};
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     Card,
     {
       icon: IconLink,
       title: group.name || t("card.shortcuts"),
-      actions: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-icon-btn", style: { width: 24, height: 24 }, "aria-label": t("shortcuts.add"), onClick: () => chrome?.openDialog?.({ type: "shortcut", groupId }), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlus, { size: 13 }) }),
+      actions: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-icon-btn", style: { width: 24, height: 24 }, "aria-label": t("shortcuts.add"), onClick: () => chrome?.openDialog?.({ type: "shortcut", groupId }), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlus, { size: 13 }) }),
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-tiles", children: [...builtins, ...custom].map((item) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-tiles", children: [...builtins, ...custom].map((item) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
           "span",
           {
             className: "qh-tile-wrap",
@@ -1375,16 +1571,16 @@ function ShortcutGroupCard({ t, state, setState, services, groupId = DEFAULT_GRO
               itemMenu(event, item);
             } : void 0,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "qh-tile", onClick: item.run, title: item.url || item.label, children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-tile-icon", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(TileIcon, { item }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-tile-label", children: item.label })
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "qh-tile", onClick: item.run, title: item.url || item.label, children: [
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-tile-icon", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(TileIcon, { item }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-tile-label", children: item.label })
               ] }),
-              item.kind === "url" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-tile-more", "aria-label": t("shortcuts.menuFor", { name: item.label }), "aria-haspopup": "menu", onClick: (event) => itemMenu(event, item), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconMore, { size: 12 }) }) : null
+              item.kind === "url" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-tile-more", "aria-label": t("shortcuts.menuFor", { name: item.label }), "aria-haspopup": "menu", onClick: (event) => itemMenu(event, item), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconMore, { size: 12 }) }) : null
             ]
           },
           item.id
         )) }),
-        !custom.length ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("shortcuts.empty") }) : null
+        !custom.length ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("shortcuts.empty") }) : null
       ]
     }
   );
@@ -1414,11 +1610,11 @@ function FocusCard({ t, state, setState }) {
   const pause = () => setState({ focus: { ...focus, endAt: 0, remainingMs: Math.max(0, focus.endAt - Date.now()) } });
   const reset = () => setState({ focus: { minutes: focus.minutes, endAt: 0, remainingMs: focus.minutes * 6e4 } });
   const status = running ? t("focus.running") : focus.remainingMs === 0 ? t("focus.done") : focus.remainingMs < totalMs ? t("focus.paused") : t("focus.idle");
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Card, { icon: IconTimer, title: t("card.focus"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-focus", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-focus-dial", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("svg", { width: "128", height: "128", viewBox: "0 0 120 120", "aria-hidden": "true", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("circle", { className: "qh-focus-track", cx: "60", cy: "60", r: DIAL_R }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Card, { icon: IconTimer, title: t("card.focus"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-focus", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-focus-dial", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("svg", { width: "128", height: "128", viewBox: "0 0 120 120", "aria-hidden": "true", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("circle", { className: "qh-focus-track", cx: "60", cy: "60", r: DIAL_R }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           "circle",
           {
             className: "qh-focus-arc",
@@ -1431,12 +1627,12 @@ function FocusCard({ t, state, setState }) {
           }
         )
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-focus-center", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-focus-clock", children: `${mm}:${ss}` }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-focus-status", children: status })
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-focus-center", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-focus-clock", children: `${mm}:${ss}` }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-focus-status", children: status })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-focus-presets", role: "group", children: FOCUS_PRESETS.map((minutes) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-focus-presets", role: "group", children: FOCUS_PRESETS.map((minutes) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       "button",
       {
         type: "button",
@@ -1448,18 +1644,18 @@ function FocusCard({ t, state, setState }) {
       },
       minutes
     )) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-focus-controls", children: [
-      running ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "qh-btn", onClick: pause, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPause, { size: 12 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-focus-controls", children: [
+      running ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "qh-btn", onClick: pause, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPause, { size: 12 }),
         " ",
         t("focus.pause")
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: start, disabled: focus.remainingMs === 0, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlay, { size: 12 }),
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: start, disabled: focus.remainingMs === 0, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlay, { size: 12 }),
         " ",
         focus.remainingMs < totalMs && focus.remainingMs > 0 ? t("focus.resume") : t("focus.start")
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "qh-btn", onClick: reset, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconRefresh, { size: 12 }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "qh-btn", onClick: reset, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconRefresh, { size: 12 }),
         " ",
         t("focus.reset")
       ] })
@@ -1475,15 +1671,15 @@ function ProgressCard({ t }) {
     ["progress.month", progress.month],
     ["progress.year", progress.year]
   ];
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Card, { icon: IconGauge, title: t("card.progress"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-progress-rows", children: rows.map(([key, value]) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-progress-row", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-progress-label", children: t(key) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-progress-bar", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-progress-fill", style: { width: `${(value * 100).toFixed(1)}%` } }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-progress-value", children: `${Math.floor(value * 100)}%` })
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Card, { icon: IconGauge, title: t("card.progress"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-progress-rows", children: rows.map(([key, value]) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-progress-row", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-progress-label", children: t(key) }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-progress-bar", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-progress-fill", style: { width: `${(value * 100).toFixed(1)}%` } }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-progress-value", children: `${Math.floor(value * 100)}%` })
   ] }, key)) }) });
 }
 function WorldClockCard({ t, lang }) {
   const now = useNow(3e4);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Card, { icon: IconClock, title: t("card.worldclock"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-clock-rows", children: DEFAULT_ZONES.map((city) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Card, { icon: IconClock, title: t("card.worldclock"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-clock-rows", children: DEFAULT_ZONES.map((city) => {
     let value;
     try {
       value = zonedTime(new Date(now), city.zone);
@@ -1491,22 +1687,22 @@ function WorldClockCard({ t, lang }) {
       return null;
     }
     const offset = value.offset > 0 ? t("worldclock.tomorrow") : value.offset < 0 ? t("worldclock.yesterday") : "";
-    return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-clock-row", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-clock-city", children: lang === "zh" ? city.label : city.labelEn }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-clock-offset", children: offset }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-clock-time", children: value.time })
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-clock-row", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-clock-city", children: lang === "zh" ? city.label : city.labelEn }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-clock-offset", children: offset }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-clock-time", children: value.time })
     ] }, city.zone);
   }) }) });
 }
 function QuoteCard({ t, lang, state, setState }) {
   const quotes = BUILTIN_QUOTES[lang] ?? BUILTIN_QUOTES.en;
   const index = dailyIndex(dayKey(), quotes.length, state.quoteShift);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
     Card,
     {
       icon: IconQuote,
       title: t("card.quote"),
-      actions: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      actions: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "button",
         {
           type: "button",
@@ -1515,10 +1711,10 @@ function QuoteCard({ t, lang, state, setState }) {
           "aria-label": t("quote.another"),
           title: t("quote.another"),
           onClick: () => setState({ quoteShift: (state.quoteShift + 1) % quotes.length }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconRefresh, { size: 12 })
+          children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconRefresh, { size: 12 })
         }
       ),
-      children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "qh-quote-text", children: quotes[index] })
+      children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "qh-quote-text", children: quotes[index] })
     }
   );
 }
@@ -1588,8 +1784,8 @@ function WeatherCard({ t, lang, state, setState }) {
     setNonce((n) => n + 1);
   };
   const dayLabels = [t("weather.today"), t("weather.tomorrow"), t("weather.afterTomorrow")];
-  const searchBox = /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-weather-search", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+  const searchBox = /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-weather-search", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       "input",
       {
         className: "qh-todo-input",
@@ -1607,45 +1803,45 @@ function WeatherCard({ t, lang, state, setState }) {
         autoFocus: picking && !place
       }
     ),
-    places === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("weather.searching") }) : null,
-    places === "error" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("weather.searchError") }) : null,
-    Array.isArray(places) && places.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("weather.noResults") }) : null,
-    Array.isArray(places) && places.length ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-weather-places", role: "listbox", "aria-label": t("weather.search"), children: places.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", role: "option", "aria-selected": "false", className: "qh-weather-place", onClick: () => pick(entry), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-place-name", children: entry.name }),
-      entry.detail ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-place-detail", children: entry.detail }) : null
+    places === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("weather.searching") }) : null,
+    places === "error" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("weather.searchError") }) : null,
+    Array.isArray(places) && places.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("weather.noResults") }) : null,
+    Array.isArray(places) && places.length ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-weather-places", role: "listbox", "aria-label": t("weather.search"), children: places.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", role: "option", "aria-selected": "false", className: "qh-weather-place", onClick: () => pick(entry), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-place-name", children: entry.name }),
+      entry.detail ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-place-detail", children: entry.detail }) : null
     ] }, `${entry.name}:${entry.latitude.toFixed(3)}:${entry.longitude.toFixed(3)}`)) }) : null
   ] });
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     Card,
     {
       icon: IconSun,
       title: t("card.weather"),
-      actions: place ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setPicking((value) => !value), children: t("weather.change") }) : null,
+      actions: place ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setPicking((value) => !value), children: t("weather.change") }) : null,
       children: [
-        place ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-weather-city", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: place.name }),
-          place.detail ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-place-detail", children: place.detail }) : null
+        place ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-weather-city", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: place.name }),
+          place.detail ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-place-detail", children: place.detail }) : null
         ] }) : null,
         picking || !place ? searchBox : null,
-        !place && !picking ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("weather.choose") }) : null,
-        place && status === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("weather.loading") }) : null,
-        place && status === "error" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setNonce((n) => n + 1), children: t("weather.error") }) : null,
-        place && status === "ready" && weather ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-weather-now", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-icon", children: import_react2.default.createElement(WEATHER_ICONS[weatherKind(weather.current.code).icon] ?? IconCloud, { size: 30 }) }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-temp", children: `${Math.round(weather.current.temperature)}\xB0` }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: "qh-weather-meta", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-cond", children: lang === "zh" ? weatherKind(weather.current.code).zh : weatherKind(weather.current.code).en }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-feels", children: t("weather.feels", { value: Math.round(weather.current.feels) }) })
+        !place && !picking ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("weather.choose") }) : null,
+        place && status === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("weather.loading") }) : null,
+        place && status === "error" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setNonce((n) => n + 1), children: t("weather.error") }) : null,
+        place && status === "ready" && weather ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-weather-now", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-icon", children: import_react3.default.createElement(WEATHER_ICONS[weatherKind(weather.current.code).icon] ?? IconCloud, { size: 30 }) }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-temp", children: `${Math.round(weather.current.temperature)}\xB0` }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "qh-weather-meta", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-cond", children: lang === "zh" ? weatherKind(weather.current.code).zh : weatherKind(weather.current.code).en }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-feels", children: t("weather.feels", { value: Math.round(weather.current.feels) }) })
             ] })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-weather-days", children: weather.days.map((day, index) => {
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-weather-days", children: weather.days.map((day, index) => {
             const kind = weatherKind(day.code);
             const DayIcon = WEATHER_ICONS[kind.icon] ?? IconCloud;
-            return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-weather-day", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-day-label", children: dayLabels[index] ?? day.day }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DayIcon, { size: 15 }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-weather-day-temp", children: `${Math.round(day.min)}\xB0 / ${Math.round(day.max)}\xB0` })
+            return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-weather-day", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-day-label", children: dayLabels[index] ?? day.day }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(DayIcon, { size: 15 }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-weather-day-temp", children: `${Math.round(day.min)}\xB0 / ${Math.round(day.max)}\xB0` })
             ] }, day.day);
           }) })
         ] }) : null
@@ -1667,8 +1863,8 @@ function DailyFocusCard({ t, state, setState }) {
     setState({ dailyFocus: next });
     setDraft("");
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(Card, { icon: IconTarget, title: t("card.dailyFocus"), count: `${items.filter((i) => i.done).length}/${items.length || 3}`, children: [
-    items.length < 3 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(Card, { icon: IconTarget, title: t("card.dailyFocus"), count: `${items.filter((i) => i.done).length}/${items.length || 3}`, children: [
+    items.length < 3 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
       "form",
       {
         className: "qh-todo-form",
@@ -1677,7 +1873,7 @@ function DailyFocusCard({ t, state, setState }) {
           submit();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
             "input",
             {
               className: "qh-todo-input",
@@ -1687,13 +1883,13 @@ function DailyFocusCard({ t, state, setState }) {
               onChange: (event) => setDraft(event.target.value)
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlus, { size: 15 }) })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlus, { size: 15 }) })
         ]
       }
-    ) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("dailyFocus.full") }),
-    items.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("dailyFocus.empty") }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-todo-list", children: items.map((item) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: `qh-todo-item${item.done ? " qh-done" : ""}`, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    ) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("dailyFocus.full") }),
+    items.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("dailyFocus.empty") }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-todo-list", children: items.map((item) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: `qh-todo-item${item.done ? " qh-done" : ""}`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "button",
         {
           type: "button",
@@ -1702,22 +1898,22 @@ function DailyFocusCard({ t, state, setState }) {
           onClick: () => setState({
             dailyFocus: { ...focus, items: items.map((entry) => entry.id === item.id ? { ...entry, done: !entry.done } : entry) }
           }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconCheck, { size: 11, strokeWidth: 2.6 })
+          children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconCheck, { size: 11, strokeWidth: 2.6 })
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-todo-text", children: item.text }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-todo-text", children: item.text }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "button",
         {
           type: "button",
           className: "qh-todo-del",
           "aria-label": t("action.remove", { name: item.text }),
           onClick: () => setState({ dailyFocus: { ...focus, items: items.filter((entry) => entry.id !== item.id) } }),
-          children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconClose, { size: 12 })
+          children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconClose, { size: 12 })
         }
       )
     ] }, item.id)) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("footer", { className: "qh-card-foot", children: t("dailyFocus.hint") })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("footer", { className: "qh-card-foot", children: t("dailyFocus.hint") })
   ] });
 }
 function QuickNoteCard({ t, state, setState, limit = 6 }) {
@@ -1739,15 +1935,15 @@ function QuickNoteCard({ t, state, setState, limit = 6 }) {
     } catch {
     }
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     Card,
     {
       icon: IconZap,
       title: t("card.quickNote"),
       count: notes.length > 0 ? String(notes.length) : "",
-      actions: notes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-icon-btn", style: { width: 24, height: 24 }, "aria-label": t("quickNote.copy"), title: t("quickNote.copy"), onClick: copyAll, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconCopy, { size: 12 }) }) : null,
+      actions: notes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-icon-btn", style: { width: 24, height: 24 }, "aria-label": t("quickNote.copy"), title: t("quickNote.copy"), onClick: copyAll, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconCopy, { size: 12 }) }) : null,
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
           "form",
           {
             className: "qh-todo-form",
@@ -1756,7 +1952,7 @@ function QuickNoteCard({ t, state, setState, limit = 6 }) {
               submit();
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
                 "input",
                 {
                   className: "qh-todo-input",
@@ -1766,41 +1962,41 @@ function QuickNoteCard({ t, state, setState, limit = 6 }) {
                   onChange: (event) => setDraft(event.target.value)
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlus, { size: 15 }) })
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlus, { size: 15 }) })
             ]
           }
         ),
-        notes.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("quickNote.empty") }) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-note-list", children: (expanded ? notes : notes.slice(0, limit)).map((note) => {
+        notes.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("quickNote.empty") }) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-note-list", children: (expanded ? notes : notes.slice(0, limit)).map((note) => {
           const date = new Date(note.time);
           const stamp = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-          return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-note-row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-note-time", children: stamp }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-note-text", children: note.text }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-note-row", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-note-time", children: stamp }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-note-text", children: note.text }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
               "button",
               {
                 type: "button",
                 className: "qh-todo-del",
                 "aria-label": t("action.remove", { name: note.text }),
                 onClick: () => setState({ quickNotes: notes.filter((entry) => entry.id !== note.id) }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconClose, { size: 12 })
+                children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconClose, { size: 12 })
               }
             )
           ] }, note.id);
         }) }),
-        notes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("footer", { className: "qh-card-foot", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: copied ? t("quickNote.copied") : "" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: { flex: 1 } }),
-          notes.length > limit ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setExpanded((value) => !value), children: expanded ? t("quickNote.showLess") : t("quickNote.showAll", { count: notes.length }) }) : null,
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setState({ quickNotes: [] }), children: t("quickNote.clear") })
+        notes.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("footer", { className: "qh-card-foot", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: copied ? t("quickNote.copied") : "" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
+          notes.length > limit ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setExpanded((value) => !value), children: expanded ? t("quickNote.showLess") : t("quickNote.showAll", { count: notes.length }) }) : null,
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => setState({ quickNotes: [] }), children: t("quickNote.clear") })
         ] }) : null
       ]
     }
   );
 }
 function ScratchpadCard({ t, state, setState }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Card, { icon: IconNotebook, title: t("card.scratchpad"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Card, { icon: IconNotebook, title: t("card.scratchpad"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
     "textarea",
     {
       className: "qh-scratchpad",
@@ -1823,8 +2019,8 @@ function HabitCard({ t, state, setState }) {
     setState({ habits: next });
     setDraft("");
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(Card, { icon: IconFlame, title: t("card.habit"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(Card, { icon: IconFlame, title: t("card.habit"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
       "form",
       {
         className: "qh-todo-form",
@@ -1833,29 +2029,29 @@ function HabitCard({ t, state, setState }) {
           submit();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("input", { className: "qh-todo-input", value: draft, placeholder: t("habit.add"), maxLength: 32, onChange: (event) => setDraft(event.target.value) }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlus, { size: 15 }) })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { className: "qh-todo-input", value: draft, placeholder: t("habit.add"), maxLength: 32, onChange: (event) => setDraft(event.target.value) }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("shortcuts.confirm"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlus, { size: 15 }) })
         ]
       }
     ),
-    habits.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("habit.empty") }) : null,
-    habits.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-habit-grid-head", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", {}),
-        days.map((day) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `qh-habit-day${day === today ? " qh-today" : ""}`, children: Number(day.slice(8)) }, day)),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", {})
+    habits.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("habit.empty") }) : null,
+    habits.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-habit-grid-head", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", {}),
+        days.map((day) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `qh-habit-day${day === today ? " qh-today" : ""}`, children: Number(day.slice(8)) }, day)),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", {})
       ] }),
       habits.map((habit) => {
         const count = log[habit.id]?.[today] ?? 0;
         const reached = count >= habit.target;
-        return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-habit-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-habit-name", title: habit.name, children: habit.name }),
+        return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-habit-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-habit-name", title: habit.name, children: habit.name }),
           days.map((day) => {
             const value = log[habit.id]?.[day] ?? 0;
-            return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `qh-habit-dot${value >= habit.target ? " qh-full" : value > 0 ? " qh-part" : ""}` }, day);
+            return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `qh-habit-dot${value >= habit.target ? " qh-full" : value > 0 ? " qh-part" : ""}` }, day);
           }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { className: "qh-habit-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { className: "qh-habit-actions", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
               "button",
               {
                 type: "button",
@@ -1864,17 +2060,17 @@ function HabitCard({ t, state, setState }) {
                 onClick: () => setState({
                   habitLog: reached ? uncheckHabit(log, habit.id, today) : checkinHabit(log, habit.id, today, habit.target)
                 }),
-                children: reached ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconCheck, { size: 10, strokeWidth: 2.6 }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlus, { size: 10, strokeWidth: 2.4 })
+                children: reached ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconCheck, { size: 10, strokeWidth: 2.6 }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlus, { size: 10, strokeWidth: 2.4 })
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
               "button",
               {
                 type: "button",
                 className: "qh-todo-del",
                 "aria-label": t("action.remove", { name: habit.name }),
                 onClick: () => setState({ habits: habits.filter((entry) => entry.id !== habit.id) }),
-                children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconClose, { size: 11 })
+                children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconClose, { size: 11 })
               }
             )
           ] })
@@ -1894,26 +2090,26 @@ function CountdownCard({ t, state, setState }) {
     setState({ countdown: { date, label: label.trim().slice(0, 30) } });
     setEditing(false);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     Card,
     {
       icon: IconHourglass,
       title: t("card.countdown"),
-      actions: configured && !editing ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-icon-btn", style: { width: 24, height: 24 }, "aria-label": t("countdown.edit"), onClick: () => {
+      actions: configured && !editing ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-icon-btn", style: { width: 24, height: 24 }, "aria-label": t("countdown.edit"), onClick: () => {
         setDate(state.countdown.date);
         setLabel(state.countdown.label);
         setEditing(true);
-      }, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPen, { size: 12 }) }) : null,
+      }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPen, { size: 12 }) }) : null,
       children: [
-        !configured && !editing ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("countdown.unset") }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-btn qh-accent", onClick: () => {
+        !configured && !editing ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("countdown.unset") }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-btn qh-accent", onClick: () => {
             setDate("");
             setLabel("");
             setEditing(true);
           }, children: t("countdown.set") }) })
         ] }) : null,
-        editing ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+        editing ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
           "form",
           {
             className: "qh-shortcut-form",
@@ -1922,21 +2118,21 @@ function CountdownCard({ t, state, setState }) {
               save();
             },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("input", { type: "date", value: date, onChange: (event) => setDate(event.target.value), "aria-label": t("countdown.set") }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("input", { value: label, placeholder: t("countdown.label"), maxLength: 30, onChange: (event) => setLabel(event.target.value) }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-row", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-btn", onClick: () => setEditing(false), children: t("shortcuts.cancel") }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "submit", className: "qh-btn qh-accent", children: t("shortcuts.confirm") })
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "date", value: date, onChange: (event) => setDate(event.target.value), "aria-label": t("countdown.set") }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { value: label, placeholder: t("countdown.label"), maxLength: 30, onChange: (event) => setLabel(event.target.value) }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-btn", onClick: () => setEditing(false), children: t("shortcuts.cancel") }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "submit", className: "qh-btn qh-accent", children: t("shortcuts.confirm") })
               ] })
             ]
           }
         ) : null,
-        configured && !editing && diff !== null ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-countdown", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-countdown-number", children: [
+        configured && !editing && diff !== null ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-countdown", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-countdown-number", children: [
             diff === 0 ? t("countdown.today") : Math.abs(diff),
-            diff !== 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-countdown-unit", children: t("countdown.days") }) : null
+            diff !== 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-countdown-unit", children: t("countdown.days") }) : null
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-countdown-label", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-countdown-label", children: [
             state.countdown.label || state.countdown.date,
             " \xB7 ",
             diff === 0 ? state.countdown.date : diff > 0 ? t("countdown.left", { n: diff }) : t("countdown.passed", { n: -diff })
@@ -1959,9 +2155,9 @@ function DailyQuestionCard({ t, lang, state, setState }) {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => setSaved(true), 600);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(Card, { icon: IconHelpCircle, title: t("card.dailyQuestion"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "qh-quote-text", children: question }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(Card, { icon: IconHelpCircle, title: t("card.dailyQuestion"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "qh-quote-text", children: question }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       "textarea",
       {
         className: "qh-scratchpad",
@@ -1971,7 +2167,7 @@ function DailyQuestionCard({ t, lang, state, setState }) {
         onChange: (event) => onChange(event.target.value)
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("footer", { className: "qh-card-foot", children: saved && answer.trim() ? t("dailyQuestion.saved") : "" })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("footer", { className: "qh-card-foot", children: saved && answer.trim() ? t("dailyQuestion.saved") : "" })
   ] });
 }
 function MultiSearchCard({ t, lang, state, setState, openAll = true }) {
@@ -2014,8 +2210,8 @@ function MultiSearchCard({ t, lang, state, setState, openAll = true }) {
     setDraft("");
     return parsed;
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(Card, { icon: IconSearch, title: t("card.multiSearch"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-focus-presets", role: "group", "aria-label": t("multiSearch.groups"), children: SEARCH_GROUPS.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(Card, { icon: IconSearch, title: t("card.multiSearch"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-focus-presets", role: "group", "aria-label": t("multiSearch.groups"), children: SEARCH_GROUPS.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       "button",
       {
         type: "button",
@@ -2026,7 +2222,7 @@ function MultiSearchCard({ t, lang, state, setState, openAll = true }) {
       },
       entry.id
     )) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-focus-presets", role: "group", "aria-label": t("multiSearch.sites"), children: sites.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-focus-presets", role: "group", "aria-label": t("multiSearch.sites"), children: sites.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       "button",
       {
         type: "button",
@@ -2037,7 +2233,7 @@ function MultiSearchCard({ t, lang, state, setState, openAll = true }) {
       },
       entry.id
     )) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
       "form",
       {
         className: "qh-todo-form",
@@ -2046,13 +2242,13 @@ function MultiSearchCard({ t, lang, state, setState, openAll = true }) {
           search();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("input", { className: "qh-todo-input", value: query, placeholder: t("multiSearch.placeholder"), onChange: (event) => setQuery(event.target.value) }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("multiSearch.open"), children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconSearch, { size: 14 }) })
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { className: "qh-todo-input", value: query, placeholder: t("multiSearch.placeholder"), onChange: (event) => setQuery(event.target.value) }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "submit", className: "qh-todo-add", "aria-label": t("multiSearch.open"), children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconSearch, { size: 14 }) })
         ]
       }
     ),
-    editing ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-templates", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+    editing ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-templates", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "textarea",
         {
           className: "qh-templates-input",
@@ -2063,18 +2259,18 @@ function MultiSearchCard({ t, lang, state, setState, openAll = true }) {
           onChange: (event) => setDraft(event.target.value)
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-card-foot", children: [
-        templateError ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: templateError }) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: saveTemplates, children: t("shortcuts.confirm") }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => {
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-card-foot", children: [
+        templateError ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: templateError }) : null,
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: saveTemplates, children: t("shortcuts.confirm") }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => {
           setEditing(false);
           setDraft("");
           setTemplateError(null);
         }, children: t("shortcuts.cancel") })
       ] })
-    ] }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "qh-card-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: openAll && active.length > 1 ? t("multiSearch.openAllHint", { count: active.length }) : t("multiSearch.openFirstHint", { name: lang === "zh" ? active[0].zh : active[0].en }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => {
+    ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-card-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: openAll && active.length > 1 ? t("multiSearch.openAllHint", { count: active.length }) : t("multiSearch.openFirstHint", { name: lang === "zh" ? active[0].zh : active[0].en }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-link-btn", onClick: () => {
         setDraft(state.searchTemplates ?? "");
         setEditing(true);
       }, children: t("multiSearch.templates") })
@@ -2095,19 +2291,19 @@ function HeatmapCard({ t, services }) {
     return { days: days2, counts: counts2, max: max2 };
   }, [list]);
   const today = dayKey();
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(Card, { icon: IconGrid, title: t("card.heatmap"), children: max === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-card-empty", children: t("heatmap.empty") }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-heatmap", role: "img", "aria-label": t("card.heatmap"), children: days.map((day) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(Card, { icon: IconGrid, title: t("card.heatmap"), children: max === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-card-empty", children: t("heatmap.empty") }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-heatmap", role: "img", "aria-label": t("card.heatmap"), children: days.map((day) => {
       const count = counts.get(day) ?? 0;
       const level = heatIntensity(count, max);
-      return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: `qh-heat qh-heat-${level}${day === today ? " qh-today" : ""}`, title: `${day} \xB7 ${count}` }, day);
+      return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: `qh-heat qh-heat-${level}${day === today ? " qh-today" : ""}`, title: `${day} \xB7 ${count}` }, day);
     }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("footer", { className: "qh-card-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: t("heatmap.less") }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-heat qh-heat-1" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-heat qh-heat-2" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-heat qh-heat-3" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "qh-heat qh-heat-4" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: t("heatmap.more") })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("footer", { className: "qh-card-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: t("heatmap.less") }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-heat qh-heat-1" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-heat qh-heat-2" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-heat qh-heat-3" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-heat qh-heat-4" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: t("heatmap.more") })
     ] })
   ] }) });
 }
@@ -2168,8 +2364,8 @@ function AmbientCard({ t }) {
     setPlaying(true);
   };
   useEffect(() => () => stop(), []);
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(Card, { icon: IconWaves, title: t("card.ambient"), children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-focus-presets", role: "group", children: NOISE_KINDS.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(Card, { icon: IconWaves, title: t("card.ambient"), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-focus-presets", role: "group", children: NOISE_KINDS.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       "button",
       {
         type: "button",
@@ -2183,29 +2379,64 @@ function AmbientCard({ t }) {
       },
       entry.id ?? entry
     )) }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "qh-focus-controls", style: { justifyContent: "center" }, children: playing ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "qh-btn", onClick: stop, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPause, { size: 12 }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-focus-controls", style: { justifyContent: "center" }, children: playing ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "qh-btn", onClick: stop, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPause, { size: 12 }),
       " ",
       t("ambient.stop")
-    ] }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: () => play(kind), children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(IconPlay, { size: 12 }),
+    ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: () => play(kind), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(IconPlay, { size: 12 }),
       " ",
       t("ambient.play")
     ] }) })
   ] });
 }
 
+// src/client/provider-card.jsx
+var import_jsx_runtime4 = require("react/jsx-runtime");
+function Thumb({ item }) {
+  const [failed, setFailed] = import_react4.default.useState(false);
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: `qh-thumb${!item.image || failed ? " is-icon" : ""}`, children: item.image && !failed ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("img", { src: item.image, alt: "", loading: "lazy", decoding: "async", referrerPolicy: "no-referrer", onError: () => setFailed(true) }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ProviderIcon, { name: item.icon || "image", size: 17 }) });
+}
+function ProviderCard({ cardId, services, t }) {
+  const registry = services?.providers || emptyProviderStore;
+  const state = import_react4.default.useSyncExternalStore(registry.subscribe, registry.getSnapshot, registry.getSnapshot), section = state.sections.find((s) => s.cardId === cardId), [error, setError] = import_react4.default.useState("");
+  const run = (action) => Promise.resolve().then(action).catch((e) => setError(e.message || t("search.error")));
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-provider-card", "data-source": section?.sourceId, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(Card, { sourceId: section?.sourceId, icon: IconGrid, title: section?.title || cardId.split(":").at(-1), actions: section?.more ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("button", { className: "qh-icon-button qh-card-more", type: "button", onClick: () => run(section.more.run), children: [
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ProviderIcon, { name: section.more.icon, size: 14 }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: section.more.label })
+  ] }) : null, children: [
+    error ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-card-empty", role: "alert", children: error }) : null,
+    !section ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-card-empty", children: t("provider.unavailable") }) : !section.items.length ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-card-empty", children: section.empty }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-list", children: section.items.map((item) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { role: "button", tabIndex: 0, className: `qh-item${item.active ? " is-active" : ""}`, onClick: () => run(item.open), onKeyDown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        run(item.open);
+      }
+    }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Thumb, { item }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "qh-item-body", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-item-title", children: item.title }),
+        item.subtitle || item.meta ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-item-sub", children: [item.subtitle, item.meta].filter(Boolean).join(" \xB7 ") }) : null,
+        item.progress !== void 0 ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-progress", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-progress-fill", style: { width: `${Math.round(item.progress * 100)}%` } }) }) : null
+      ] }),
+      item.actions?.map((action) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-icon-button qh-item-action", "aria-label": action.label, onKeyDown: (e) => e.stopPropagation(), onClick: (e) => {
+        e.stopPropagation();
+        run(action.run);
+      }, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ProviderIcon, { name: action.icon, size: 14 }) }, action.id))
+    ] }, item.id)) })
+  ] }) });
+}
+
 // src/client/dialogs.jsx
-var import_react4 = __toESM(require("react"), 1);
+var import_react6 = __toESM(require("react"), 1);
 
 // src/client/ui.jsx
-var import_react3 = __toESM(require("react"), 1);
-var import_jsx_runtime3 = require("react/jsx-runtime");
-var { useCallback, useEffect: useEffect2, useLayoutEffect, useRef: useRef2, useState: useState2 } = import_react3.default;
+var import_react5 = __toESM(require("react"), 1);
+var import_jsx_runtime5 = require("react/jsx-runtime");
+var { useCallback, useEffect: useEffect2, useLayoutEffect, useRef: useRef2, useState: useState2 } = import_react5.default;
 var FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 function Modal({ title, onClose, children, wide = false, label }) {
   const ref = useRef2(null);
-  const titleId = import_react3.default.useId();
+  const titleId = import_react5.default.useId();
   useLayoutEffect(() => {
     const previous = document.activeElement;
     const root = ref.current;
@@ -2234,9 +2465,9 @@ function Modal({ title, onClose, children, wide = false, label }) {
       first.focus();
     }
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-overlay", onMouseDown: (event) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-overlay", onMouseDown: (event) => {
     if (event.target === event.currentTarget) onClose();
-  }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+  }, children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
     "div",
     {
       ref,
@@ -2248,8 +2479,8 @@ function Modal({ title, onClose, children, wide = false, label }) {
       tabIndex: -1,
       onKeyDown,
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("header", { className: "qh-modal-head", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("h2", { id: titleId, children: title }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-modal-body", children })
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("header", { className: "qh-modal-head", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { id: titleId, children: title }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-modal-body", children })
       ]
     }
   ) });
@@ -2297,7 +2528,7 @@ function MenuList({ anchor, items, onClose, trigger }) {
       onClose();
     } else if (event.key === "Tab") onClose();
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { ref, className: "qh-menu", role: "menu", style: pos ? { left: pos.left, top: pos.top } : { opacity: 0, pointerEvents: "none" }, onKeyDown, children: items.map((item, index) => item.separator ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-menu-sep", role: "separator" }, `sep-${index}`) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { ref, className: "qh-menu", role: "menu", style: pos ? { left: pos.left, top: pos.top } : { opacity: 0, pointerEvents: "none" }, onKeyDown, children: items.map((item, index) => item.separator ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-menu-sep", role: "separator" }, `sep-${index}`) : /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
     "button",
     {
       type: "button",
@@ -2311,8 +2542,8 @@ function MenuList({ anchor, items, onClose, trigger }) {
         item.onSelect();
       },
       children: [
-        item.icon ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(item.icon, { size: 14 }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "qh-menu-gap" }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: item.label })
+        item.icon ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(item.icon, { size: 14 }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "qh-menu-gap" }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { children: item.label })
       ]
     },
     item.key ?? item.label
@@ -2343,7 +2574,7 @@ function useMenu() {
     serial.current += 1;
     setState({ anchor: { rect }, items, serial: serial.current });
   }, [close]);
-  const menu = state ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(MenuList, { anchor: state.anchor, items: state.items, onClose: close, trigger }, state.serial) : null;
+  const menu = state ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(MenuList, { anchor: state.anchor, items: state.items, onClose: close, trigger }, state.serial) : null;
   return { menu, open, close };
 }
 function useToasts() {
@@ -2366,9 +2597,9 @@ function useToasts() {
   return { toasts, push, dismiss };
 }
 function ToastHost({ toasts, dismiss }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "qh-toasts", role: "status", "aria-live": "polite", children: toasts.map((toast) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "qh-toast", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: toast.message }),
-    toast.action ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "qh-toast-action", onClick: () => {
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-toasts", role: "status", "aria-live": "polite", children: toasts.map((toast) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "qh-toast", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { children: toast.message }),
+    toast.action ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("button", { type: "button", className: "qh-toast-action", onClick: () => {
       dismiss(toast.id);
       toast.action.run();
     }, children: toast.action.label }) : null
@@ -2376,8 +2607,8 @@ function ToastHost({ toasts, dismiss }) {
 }
 
 // src/client/dialogs.jsx
-var import_jsx_runtime4 = require("react/jsx-runtime");
-var { useRef: useRef3, useState: useState3 } = import_react4.default;
+var import_jsx_runtime6 = require("react/jsx-runtime");
+var { useRef: useRef3, useState: useState3 } = import_react6.default;
 var TEMPLATE_ICONS = { home: IconHome, work: IconBriefcase, timer: IconTimer, pen: IconPen, book: IconBook, flame: IconFlame, compass: IconCompass };
 TEMPLATE_ICONS.notes = IconNotebook;
 function NewTabDialog({ t, onCreate, onClose }) {
@@ -2403,12 +2634,12 @@ function NewTabDialog({ t, onCreate, onClose }) {
     { id: null, Icon: IconSquareDashed, name: t("settings.blankTab"), desc: t("template.blank.desc") },
     ...PAGE_TEMPLATES.map((entry) => ({ id: entry.id, Icon: TEMPLATE_ICONS[entry.icon] ?? IconHome, name: t(`template.${entry.id}`), desc: t(`template.${entry.id}.desc`) }))
   ];
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Modal, { title: t("pages.add"), onClose, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("form", { onSubmit: (event) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Modal, { title: t("pages.add"), onClose, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("form", { onSubmit: (event) => {
     event.preventDefault();
     submit();
   }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "qh-hint", children: t("template.hint") }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-template-grid", role: "radiogroup", "aria-label": t("settings.tabTemplate"), children: choices.map((choice) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-hint", children: t("template.hint") }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-template-grid", role: "radiogroup", "aria-label": t("settings.tabTemplate"), children: choices.map((choice) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
       "button",
       {
         type: "button",
@@ -2426,18 +2657,18 @@ function NewTabDialog({ t, onCreate, onClose }) {
           next.click();
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(choice.Icon, { size: 18 }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { className: "qh-template-text", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "qh-template-name", children: choice.name }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "qh-template-desc", children: choice.desc })
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(choice.Icon, { size: 18 }),
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { className: "qh-template-text", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "qh-template-name", children: choice.name }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "qh-template-desc", children: choice.desc })
           ] })
         ]
       },
       choice.id ?? "blank"
     )) }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("settings.tabName") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("settings.tabName") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "input",
         {
           type: "text",
@@ -2452,10 +2683,10 @@ function NewTabDialog({ t, onCreate, onClose }) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("footer", { className: "qh-modal-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("button", { type: "submit", className: "qh-btn qh-accent", disabled: !name.trim() || busy, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IconPlus, { size: 13 }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "qh-modal-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("button", { type: "submit", className: "qh-btn qh-accent", disabled: !name.trim() || busy, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconPlus, { size: 13 }),
         t("pages.add")
       ] })
     ] })
@@ -2468,13 +2699,13 @@ function PromptDialog({ title, label, initial, submitText, t, onSubmit, onClose 
     if (!trimmed) return;
     onSubmit(trimmed);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Modal, { title, onClose, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("form", { onSubmit: (event) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Modal, { title, onClose, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("form", { onSubmit: (event) => {
     event.preventDefault();
     submit();
   }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: label }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: label }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "input",
         {
           type: "text",
@@ -2486,63 +2717,63 @@ function PromptDialog({ title, label, initial, submitText, t, onSubmit, onClose 
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("footer", { className: "qh-modal-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "submit", className: "qh-btn qh-accent", disabled: !value.trim(), children: submitText })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "qh-modal-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "submit", className: "qh-btn qh-accent", disabled: !value.trim(), children: submitText })
     ] })
   ] }) });
 }
 function ConfirmDialog({ title, message, confirmText, t, danger = true, onConfirm, onClose }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(Modal, { title, onClose, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "qh-confirm-text", children: message }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("footer", { className: "qh-modal-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn", "data-autofocus": true, onClick: onClose, children: t("dialog.cancel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: `qh-btn${danger ? " qh-danger-btn" : " qh-accent"}`, onClick: onConfirm, children: confirmText })
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(Modal, { title, onClose, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-confirm-text", children: message }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "qh-modal-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn", "data-autofocus": true, onClick: onClose, children: t("dialog.cancel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: `qh-btn${danger ? " qh-danger-btn" : " qh-accent"}`, onClick: onConfirm, children: confirmText })
     ] })
   ] });
 }
 function CardSettingsDialog({ t, tab, cardId, onChange, onClose }) {
   const meta = cardMeta(cardId);
   const options = cardOptions(tab, cardId);
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(Modal, { title: t("cardSettings.title", { name: t(`card.${cardId}`) }), onClose, children: [
-    meta?.limit ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field qh-field-inline", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("cardSettings.count") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("select", { "data-autofocus": true, value: options.limit, onChange: (event) => onChange({ limit: Number(event.target.value) }), children: Array.from({ length: meta.limit.max }, (_, index) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: index + 1, children: index + 1 }, index + 1)) })
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(Modal, { title: t("cardSettings.title", { name: t(`card.${cardId}`) }), onClose, children: [
+    meta?.limit ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field qh-field-inline", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("cardSettings.count") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("select", { "data-autofocus": true, value: options.limit, onChange: (event) => onChange({ limit: Number(event.target.value) }), children: Array.from({ length: meta.limit.max }, (_, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("option", { value: index + 1, children: index + 1 }, index + 1)) })
     ] }) : null,
-    meta?.options?.includes("openAll") ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field qh-field-inline", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("cardSettings.onEnter") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("select", { "data-autofocus": meta.limit ? void 0 : true, value: options.openAll ? "all" : "first", onChange: (event) => onChange({ openAll: event.target.value === "all" }), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "all", children: t("cardSettings.openAll") }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "first", children: t("cardSettings.openFirst") })
+    meta?.options?.includes("openAll") ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field qh-field-inline", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("cardSettings.onEnter") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("select", { "data-autofocus": meta.limit ? void 0 : true, value: options.openAll ? "all" : "first", onChange: (event) => onChange({ openAll: event.target.value === "all" }), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("option", { value: "all", children: t("cardSettings.openAll") }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("option", { value: "first", children: t("cardSettings.openFirst") })
       ] })
     ] }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "qh-hint", children: t("cardSettings.note") }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("footer", { className: "qh-modal-foot", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: onClose, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IconCheck, { size: 13 }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-hint", children: t("cardSettings.note") }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("footer", { className: "qh-modal-foot", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: onClose, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconCheck, { size: 13 }),
       t("settings.close")
     ] }) })
   ] });
 }
 function MoveCardDialog({ t, tabs, fromId, cardId, cardName, tabName: tabName2, onMove, onClose }) {
   const targets = tabs.filter((tab) => tab.id !== fromId);
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(Modal, { title: t("layout.moveTitle", { name: cardName ?? t(`card.${cardId}`) }), onClose, children: [
-    !targets.length ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "qh-hint", children: t("layout.singlePage") }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-move-list", children: targets.map((tab, index) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(Modal, { title: t("layout.moveTitle", { name: cardName ?? t(`card.${cardId}`) }), onClose, children: [
+    !targets.length ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-hint", children: t("layout.singlePage") }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-move-list", children: targets.map((tab, index) => {
       const exists = tab.cards.includes(cardId);
-      return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "qh-move-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: tabName2(tab, t) }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn", "data-autofocus": index === 0 ? true : void 0, disabled: exists, onClick: () => onMove(tab.id), children: exists ? t("library.added") : t("layout.move") })
+      return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-move-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: tabName2(tab, t) }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn", "data-autofocus": index === 0 ? true : void 0, disabled: exists, onClick: () => onMove(tab.id), children: exists ? t("library.added") : t("layout.move") })
       ] }, tab.id);
     }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("footer", { className: "qh-modal-foot", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }) })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("footer", { className: "qh-modal-foot", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }) })
   ] });
 }
 function AppearanceDialog({ t, state, setState, onReset, onClose }) {
   const modes = ["daily", "open", "gradient"];
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(Modal, { title: t("settings.appearance"), onClose, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("settings.wallpaper") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-radio-row", role: "group", "aria-label": t("settings.wallpaper"), children: modes.map((mode, index) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(Modal, { title: t("settings.appearance"), onClose, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("settings.wallpaper") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-radio-row", role: "group", "aria-label": t("settings.wallpaper"), children: modes.map((mode, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "button",
         {
           type: "button",
@@ -2555,9 +2786,9 @@ function AppearanceDialog({ t, state, setState, onReset, onClose }) {
         mode
       )) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("settings.headline") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("settings.headline") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "input",
         {
           type: "text",
@@ -2568,11 +2799,11 @@ function AppearanceDialog({ t, state, setState, onReset, onClose }) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("footer", { className: "qh-modal-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn qh-danger-btn", onClick: onReset, children: t("settings.reset") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { style: { flex: 1 } }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: onClose, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(IconCheck, { size: 13 }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "qh-modal-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn qh-danger-btn", onClick: onReset, children: t("settings.reset") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { flex: 1 } }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: onClose, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconCheck, { size: 13 }),
         t("settings.close")
       ] })
     ] })
@@ -2592,13 +2823,13 @@ function ShortcutDialog({ t, item, onSubmit, onClose }) {
     onSubmit({ label, url: href, icon });
   };
   const host = href ? new URL(href).hostname : "";
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Modal, { title: item ? t("shortcuts.editTitle") : t("shortcuts.addTitle"), onClose, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("form", { onSubmit: (event) => {
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Modal, { title: item ? t("shortcuts.editTitle") : t("shortcuts.addTitle"), onClose, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("form", { onSubmit: (event) => {
     event.preventDefault();
     submit();
   }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("shortcuts.urlLabel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("shortcuts.urlLabel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "input",
         {
           type: "text",
@@ -2613,11 +2844,11 @@ function ShortcutDialog({ t, item, onSubmit, onClose }) {
           }
         }
       ),
-      error ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "qh-form-error", role: "alert", children: error }) : null
+      error ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "qh-form-error", role: "alert", children: error }) : null
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("shortcuts.nameLabel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("shortcuts.nameLabel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
         "input",
         {
           type: "text",
@@ -2628,16 +2859,16 @@ function ShortcutDialog({ t, item, onSubmit, onClose }) {
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("shortcuts.iconLabel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-icon-choices", role: "group", "aria-label": t("shortcuts.iconLabel"), children: [FAVICON, ...SHORTCUT_ICONS].map((name) => {
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("shortcuts.iconLabel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-icon-choices", role: "group", "aria-label": t("shortcuts.iconLabel"), children: [FAVICON, ...SHORTCUT_ICONS].map((name) => {
         const Icon = TILE_ICONS[name];
-        return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-icon-choice", "aria-pressed": icon === name, "aria-label": t(name === FAVICON ? "shortcuts.siteIcon" : `shortcuts.icon.${name}`), title: t(name === FAVICON ? "shortcuts.siteIcon" : `shortcuts.icon.${name}`), onClick: () => setIcon(name), children: Icon ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Icon, { size: 16 }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(TILE_ICONS.globe, { size: 16 }) }, name);
+        return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-icon-choice", "aria-pressed": icon === name, "aria-label": t(name === FAVICON ? "shortcuts.siteIcon" : `shortcuts.icon.${name}`), title: t(name === FAVICON ? "shortcuts.siteIcon" : `shortcuts.icon.${name}`), onClick: () => setIcon(name), children: Icon ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Icon, { size: 16 }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(TILE_ICONS.globe, { size: 16 }) }, name);
       }) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("footer", { className: "qh-modal-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "submit", className: "qh-btn qh-accent", children: item ? t("shortcuts.save") : t("shortcuts.confirm") })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "qh-modal-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "submit", className: "qh-btn qh-accent", children: item ? t("shortcuts.save") : t("shortcuts.confirm") })
     ] })
   ] }) });
 }
@@ -2664,33 +2895,33 @@ function ImportBookmarksDialog({ t, onImport, onClose }) {
       if (current === token.current) setStatus(t("import.failed"));
     });
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(Modal, { title: t("import.title"), onClose, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "qh-hint", children: t("import.hint", { max: MAX_IMPORT }) }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { className: "qh-field", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: t("import.file") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("input", { type: "file", "data-autofocus": true, accept: ".html,.htm,text/html", onChange: choose })
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(Modal, { title: t("import.title"), onClose, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-hint", children: t("import.hint", { max: MAX_IMPORT }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "qh-field", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: t("import.file") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "file", "data-autofocus": true, accept: ".html,.htm,text/html", onChange: choose })
     ] }),
-    status ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "qh-form-error", role: "alert", children: status }) : null,
-    bookmarks.length ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "qh-import-preview", "aria-live": "polite", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "qh-hint", children: t("import.count", { count: bookmarks.length }) }),
-      bookmarks.slice(0, 8).map((item) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "qh-import-line", children: [
+    status ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-form-error", role: "alert", children: status }) : null,
+    bookmarks.length ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-import-preview", "aria-live": "polite", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-hint", children: t("import.count", { count: bookmarks.length }) }),
+      bookmarks.slice(0, 8).map((item) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-import-line", children: [
         item.name,
         " \xB7 ",
         new URL(item.url).hostname
       ] }, item.url)),
-      bookmarks.length > 8 ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "qh-import-line qh-dim", children: t("import.more", { count: bookmarks.length - 8 }) }) : null
+      bookmarks.length > 8 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-import-line qh-dim", children: t("import.more", { count: bookmarks.length - 8 }) }) : null
     ] }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("footer", { className: "qh-modal-foot", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "qh-btn qh-accent", disabled: !bookmarks.length, onClick: () => onImport(bookmarks), children: t("import.confirm") })
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("footer", { className: "qh-modal-foot", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn", onClick: onClose, children: t("dialog.cancel") }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-btn qh-accent", disabled: !bookmarks.length, onClick: () => onImport(bookmarks), children: t("import.confirm") })
     ] })
   ] });
 }
 
 // src/client/library.jsx
-var import_react5 = __toESM(require("react"), 1);
-var import_jsx_runtime5 = require("react/jsx-runtime");
-var { useMemo: useMemo2, useRef: useRef4, useState: useState4 } = import_react5.default;
+var import_react7 = __toESM(require("react"), 1);
+var import_jsx_runtime7 = require("react/jsx-runtime");
+var { useMemo: useMemo2, useRef: useRef4, useState: useState4 } = import_react7.default;
 var CARD_ICONS = {
   dailyFocus: IconTarget,
   todo: IconList,
@@ -2734,6 +2965,8 @@ function previewLines(id, { state, services }) {
   }
 }
 function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, onClose, tabName: tabName2 }) {
+  const registry = services?.providers || emptyProviderStore;
+  const providerState = import_react7.default.useSyncExternalStore(registry.subscribe, registry.getSnapshot, registry.getSnapshot);
   const [targetId, setTargetId] = useState4(tabId);
   const [query, setQuery] = useState4("");
   const [category, setCategoryState] = useState4(remembered.category);
@@ -2769,8 +3002,9 @@ function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, onClose
       { id: "__newGroup", action: "newGroup", category: "links", title: t("shortcuts.newGroup"), description: t("shortcuts.newGroupDesc"), icon: IconPlus, elsewhere: [], preview: [] },
       { id: "__import", action: "import", category: "links", title: t("import.title"), description: t("import.desc"), icon: IconFolder, elsewhere: [], preview: [] }
     ];
-    return [...catalog, ...groups, ...actions];
-  }, [state, services, target, t, tabName2]);
+    const plugins = providerState.sections.map((section) => ({ id: section.cardId, category: "dsh", title: section.title, description: section.description, ...place(section.cardId), preview: take(section.items.map((item) => item.title)), icon: IconGrid }));
+    return [...catalog, ...plugins, ...groups, ...actions];
+  }, [state, services, target, t, tabName2, providerState]);
   const searched = modules.filter((card) => (!onlyNew || !card.added) && `${card.title} ${card.description} ${card.preview.join(" ")} ${t(`settings.category.${card.category}`)}`.toLocaleLowerCase().includes(needle));
   const shown = searched.filter((card) => category === "all" || card.category === category);
   const grouped = category === "all" && !needle;
@@ -2788,19 +3022,19 @@ function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, onClose
   const toggle = (card) => onLayout(card.added ? removeCard(state.tabs, target.id, card.id) : addCard(state.tabs, target.id, card.id), card.added ? "remove" : "add", card);
   const renderTile = (card) => {
     const Icon = card.icon ?? CARD_ICONS[card.id] ?? IconGrid;
-    return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: `qh-lib-tile${card.added ? " qh-added" : ""}`, "data-card": card.id, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "qh-lib-tile-head", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Icon, { size: 16 }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "qh-lib-tile-title", children: card.title }),
-        card.added ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "qh-lib-badge", children: t("library.added") }) : null
+    return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: `qh-lib-tile${card.added ? " qh-added" : ""}`, "data-card": card.id, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "qh-lib-tile-head", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Icon, { size: 16 }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "qh-lib-tile-title", children: card.title }),
+        card.added ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "qh-lib-badge", children: t("library.added") }) : null
       ] }),
-      card.elsewhere.length ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-meta", children: t("library.elsewhere", { tabs: card.elsewhere.join("\u3001") }) }) : null,
-      card.preview.length ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-preview", children: card.preview.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-preview-line", children: line }, index)) }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-desc", children: card.description }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-actions", children: card.action ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("button", { type: "button", className: "qh-btn qh-accent", "aria-label": card.title, onClick: () => runAction(card), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IconPlus, { size: 13 }),
+      card.elsewhere.length ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-meta", children: t("library.elsewhere", { tabs: card.elsewhere.join("\u3001") }) }) : null,
+      card.preview.length ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-preview", children: card.preview.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-preview-line", children: line }, index)) }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-desc", children: card.description }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-actions", children: card.action ? /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("button", { type: "button", className: "qh-btn qh-accent", "aria-label": card.title, onClick: () => runAction(card), children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(IconPlus, { size: 13 }),
         t(card.action === "import" ? "import.open" : "shortcuts.newShort")
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
         "button",
         {
           type: "button",
@@ -2808,19 +3042,19 @@ function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, onClose
           "aria-label": t(card.added ? "library.removeAria" : "library.addAria", { name: card.title }),
           onClick: () => toggle(card),
           children: [
-            card.added ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IconMinusCircle, { size: 13 }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IconPlus, { size: 13 }),
+            card.added ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(IconMinusCircle, { size: 13 }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(IconPlus, { size: 13 }),
             t(card.added ? "library.remove" : "library.add")
           ]
         }
       ) })
     ] }, card.id);
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(Modal, { title: t("library.title"), onClose, wide: true, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "qh-lib-context", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { children: t("library.target", { name: "" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("select", { value: target.id, "aria-label": t("library.targetAria"), onChange: (event) => setTargetId(event.target.value), children: state.tabs.map((tab) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("option", { value: tab.id, children: tabName2(tab, t) }, tab.id)) })
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(Modal, { title: t("library.title"), onClose, wide: true, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "qh-lib-context", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: t("library.target", { name: "" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("select", { value: target.id, "aria-label": t("library.targetAria"), onChange: (event) => setTargetId(event.target.value), children: state.tabs.map((tab) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("option", { value: tab.id, children: tabName2(tab, t) }, tab.id)) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
       "input",
       {
         type: "search",
@@ -2832,10 +3066,10 @@ function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, onClose
         onChange: (event) => setQuery(event.target.value)
       }
     ),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "qh-lib-filters", role: "toolbar", "aria-label": t("library.filterAria"), ref: chips, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "qh-lib-filters", role: "toolbar", "aria-label": t("library.filterAria"), ref: chips, children: [
       chipList.map((chip, index) => {
         const Icon = CATEGORY_ICONS[chip.id];
-        return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
+        return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
           "button",
           {
             type: "button",
@@ -2845,37 +3079,37 @@ function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, onClose
             onClick: () => setCategory(chip.id),
             onKeyDown: (event) => onChipKey(event, index),
             children: [
-              Icon ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Icon, { size: 13 }) : null,
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { children: t(`settings.category.${chip.id}`) }),
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "qh-lib-count", children: chip.count })
+              Icon ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Icon, { size: 13 }) : null,
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: t(`settings.category.${chip.id}`) }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "qh-lib-count", children: chip.count })
             ]
           },
           chip.id
         );
       }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("label", { className: "qh-lib-only-new", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("input", { type: "checkbox", checked: onlyNew, onChange: (event) => setOnlyNew(event.target.checked) }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { children: t("settings.onlyNew") })
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("label", { className: "qh-lib-only-new", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("input", { type: "checkbox", checked: onlyNew, onChange: (event) => setOnlyNew(event.target.checked) }),
+        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: t("settings.onlyNew") })
       ] })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "qh-lib-list", children: [
-      !shown.length ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-empty", children: t("settings.noCards") }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "qh-lib-list", children: [
+      !shown.length ? /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-empty", children: t("settings.noCards") }) : null,
       grouped ? CATEGORIES.map((id) => {
         const items = shown.filter((card) => card.category === id);
         if (!items.length) return null;
         const Icon = CATEGORY_ICONS[id];
-        return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("h3", { className: "qh-lib-group", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(Icon, { size: 15 }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { children: t(`settings.category.${id}`) }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { className: "qh-lib-count", children: items.length })
+        return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("section", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("h3", { className: "qh-lib-group", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(Icon, { size: 15 }),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: t(`settings.category.${id}`) }),
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "qh-lib-count", children: items.length })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-grid", children: items.map(renderTile) })
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-grid", children: items.map(renderTile) })
         ] }, id);
-      }) : /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "qh-lib-grid", children: shown.map(renderTile) })
+      }) : /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "qh-lib-grid", children: shown.map(renderTile) })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("footer", { className: "qh-modal-foot", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: onClose, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(IconCheck, { size: 13 }),
+    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("footer", { className: "qh-modal-foot", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("button", { type: "button", className: "qh-btn qh-accent", onClick: onClose, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(IconCheck, { size: 13 }),
       t("settings.close")
     ] }) })
   ] });
@@ -3064,10 +3298,10 @@ function createHomeStore(storage = globalThis.localStorage) {
 }
 
 // src/client/page.jsx
-var import_jsx_runtime6 = require("react/jsx-runtime");
-var { useEffect: useEffect3, useMemo: useMemo3, useRef: useRef5, useState: useState5 } = import_react6.default;
+var import_jsx_runtime8 = require("react/jsx-runtime");
+var { useEffect: useEffect3, useMemo: useMemo3, useRef: useRef5, useState: useState5 } = import_react8.default;
 function useStore(store) {
-  return import_react6.default.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  return import_react8.default.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 }
 function langOf(t) {
   return t("date.weekdays").includes("\u4E00") ? "zh" : "en";
@@ -3084,7 +3318,7 @@ function ClockLine({ t, now }) {
   const weekdays = t("date.weekdays").split(" ").filter(Boolean);
   const weekday = weekdays[(date.getDay() + 6) % 7] ?? "";
   const formatted = t("date.format", { month: date.getMonth() + 1, day: date.getDate(), weekday }).replace(/\{(\w+)\}/g, "");
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-clock", children: `${hh}:${mm} \xB7 ${formatted} \xB7 ${t(greetingKey(date.getHours()))}` });
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-clock", children: `${hh}:${mm} \xB7 ${formatted} \xB7 ${t(greetingKey(date.getHours()))}` });
 }
 function pickDaily(state, photos) {
   return photos[dailyIndex(dayKey(), photos.length, state.wallpaperShift)];
@@ -3141,15 +3375,15 @@ function Wallpaper({ state, setState, t }) {
       setOverride((current) => pickRandom(photos, current?.id ?? photo?.id));
     }
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-bg", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-bg-gradient", style: photo?.color ? { backgroundColor: photo.color } : void 0 }),
-      !useGradient && photo && loaded ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("img", { className: "qh-bg-img qh-loaded", src: sizedUrl(photo, targetWidth(globalThis.innerWidth || 1600, globalThis.devicePixelRatio || 1)), alt: "" }) : null,
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-bg-scrim" })
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(import_jsx_runtime8.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-bg", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-bg-gradient", style: photo?.color ? { backgroundColor: photo.color } : void 0 }),
+      !useGradient && photo && loaded ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("img", { className: "qh-bg-img qh-loaded", src: sizedUrl(photo, targetWidth(globalThis.innerWidth || 1600, globalThis.devicePixelRatio || 1)), alt: "" }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-bg-scrim" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-credit", children: [
-      !useGradient && photo ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("a", { href: photo.page, target: "_blank", rel: "noreferrer noopener", children: `${photo.author} / Unsplash` }) : null,
-      !useGradient ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("wallpaper.next"), title: t("wallpaper.next"), onClick: nextPhoto, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconImage, { size: 14 }) }) : null
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-credit", children: [
+      !useGradient && photo ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("a", { href: photo.page, target: "_blank", rel: "noreferrer noopener", children: `${photo.author} / Unsplash` }) : null,
+      !useGradient ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("wallpaper.next"), title: t("wallpaper.next"), onClick: nextPhoto, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconImage, { size: 14 }) }) : null
     ] })
   ] });
 }
@@ -3160,7 +3394,7 @@ function SessionSearch({ t, services }) {
   const seqRef = useRef5(0);
   useEffect3(() => {
     const value = query.trim();
-    if (!value || !services.sessions?.search) {
+    if (!value) {
       setResults(null);
       return;
     }
@@ -3169,9 +3403,13 @@ function SessionSearch({ t, services }) {
     setActive(0);
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      services.sessions.search(value, controller.signal).then((result) => {
+      Promise.all([
+        services.sessions?.search?.(value, controller.signal).catch(() => null) ?? Promise.resolve(null),
+        services.providers?.search?.(value, 8, controller.signal) ?? Promise.resolve([])
+      ]).then(([result, provided]) => {
         if (seqRef.current !== seq || controller.signal.aborted) return;
-        setResults(result?.ok ? { items: (result.value?.items ?? []).slice(0, 8) } : "error");
+        const sessions = result?.ok ? (result.value?.items ?? []).slice(0, 8) : [];
+        setResults(!provided.length && services.sessions?.search && !result?.ok ? "error" : { items: [...provided, ...sessions].slice(0, 12) });
       }).catch(() => {
         if (seqRef.current === seq && !controller.signal.aborted) setResults("error");
       });
@@ -3180,11 +3418,12 @@ function SessionSearch({ t, services }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, services.sessions]);
+  }, [query, services.sessions, services.providers]);
   const items = results && results !== "loading" && results !== "error" ? results.items : [];
   const open = (item) => {
     if (!item) return;
-    services.uiWorkspace?.openSession?.(item.sessionId);
+    if (item.providerItem) void Promise.resolve().then(item.open).catch(() => setResults("error"));
+    else services.uiWorkspace?.openSession?.(item.sessionId);
     setQuery("");
     setResults(null);
   };
@@ -3207,12 +3446,13 @@ function SessionSearch({ t, services }) {
     }
   };
   const titleOf = (item) => {
+    if (item.providerItem) return item.title;
     const row = services.sessions?.list?.getSnapshot?.().byId?.[item.sessionId];
     return row?.title?.trim() || item.snippet?.slice(0, 40) || t("recent.untitled");
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-searchbox", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconSearch, { size: 15 }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-searchbox", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconSearch, { size: 15 }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       "input",
       {
         className: "qh-search-input",
@@ -3223,11 +3463,11 @@ function SessionSearch({ t, services }) {
         "aria-label": t("search.placeholder")
       }
     ),
-    results !== null ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-results", role: "listbox", children: [
-      results === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-results-status", children: t("search.loading") }) : null,
-      results === "error" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-results-status", children: t("search.error") }) : null,
-      results !== "loading" && results !== "error" && items.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-results-status", children: t("search.empty") }) : null,
-      items.map((item, index) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+    results !== null ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-results", role: "listbox", children: [
+      results === "loading" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-results-status", children: t("search.loading") }) : null,
+      results === "error" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-results-status", children: t("search.error") }) : null,
+      results !== "loading" && results !== "error" && items.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-results-status", children: t("search.empty") }) : null,
+      items.map((item, index) => /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
         "button",
         {
           type: "button",
@@ -3237,8 +3477,8 @@ function SessionSearch({ t, services }) {
           onMouseEnter: () => setActive(index),
           onClick: () => open(item),
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "qh-results-title", children: titleOf(item) }),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "qh-results-snippet", children: item.snippet })
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "qh-results-title", children: titleOf(item) }),
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "qh-results-snippet", children: item.snippet })
           ]
         },
         `${item.sessionId}-${index}`
@@ -3267,6 +3507,10 @@ var CARD_RENDERERS = {
 };
 function HomePage({ t, store, services }) {
   const state = useStore(store);
+  const providerState = useStore(services?.providers || emptyProviderStore);
+  useEffect3(() => {
+    void services?.providers?.refresh();
+  }, [services?.providers]);
   const setState = (patch) => store.set(patch);
   const now = useNow(3e4);
   const lang = langOf(t);
@@ -3351,7 +3595,7 @@ function HomePage({ t, store, services }) {
     event.preventDefault();
     select(tabs[next].id, true);
   };
-  const cardName = (id) => cardTitle(id, t, state.shortcutGroups);
+  const cardName = (id) => providerState.sections.find((s) => s.cardId === id)?.title || (isProviderCard(id) ? id.split(":").at(-1) : cardTitle(id, t, state.shortcutGroups));
   const shift = (id, delta) => {
     const from = tab.cards.indexOf(id);
     const to = from + delta;
@@ -3442,10 +3686,10 @@ function HomePage({ t, store, services }) {
   const cardProps = { t, lang, state, setState, services };
   const renderCard = (id) => {
     const groupId = groupIdOf(id);
-    const Component = groupId ? ShortcutGroupCard : CARD_RENDERERS[id];
+    const Component = groupId ? ShortcutGroupCard : isProviderCard(id) ? ProviderCard : CARD_RENDERERS[id];
     if (!Component) return null;
     const name = cardName(id);
-    const menuButton = /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    const menuButton = /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       "button",
       {
         type: "button",
@@ -3454,10 +3698,10 @@ function HomePage({ t, store, services }) {
         "aria-haspopup": "menu",
         onClick: (event) => cardMenu(event, id),
         onKeyDown: (event) => altMove(event, id),
-        children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconMore, { size: 15 })
+        children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconMore, { size: 15 })
       }
     );
-    const handle = editing ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    const handle = editing ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       "button",
       {
         type: "button",
@@ -3467,10 +3711,10 @@ function HomePage({ t, store, services }) {
         ...dragSource("card", id, (node) => node.closest(".qh-slot")),
         onClick: (event) => cardMenu(event, id),
         onKeyDown: (event) => altMove(event, id),
-        children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconGrip, { size: 15 })
+        children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconGrip, { size: 15 })
       }
     ) : null;
-    return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-slot", "data-card": id, ...editing ? dropTarget("card", id, "y") : {}, ...markerProps("card", id), children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(CardChromeContext.Provider, { value: { handle, menu: menuButton, editing, openMenu, openDialog: setDialog, commit }, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Component, { ...cardProps, ...cardOptions(tab, id), ...groupId ? { groupId } : {} }) }) }, id);
+    return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-slot", "data-card": id, ...editing ? dropTarget("card", id, "y") : {}, ...markerProps("card", id), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(CardChromeContext.Provider, { value: { handle, menu: menuButton, editing, openMenu, openDialog: setDialog, commit }, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Component, { cardId: id, ...cardProps, ...cardOptions(tab, id), ...groupId ? { groupId } : {} }) }) }, id);
   };
   useEffect3(() => () => store.flush(), [store]);
   useEffect3(() => () => stopScroll(), []);
@@ -3512,19 +3756,22 @@ function HomePage({ t, store, services }) {
     setState({ tabs: nextTabs });
   };
   const dialogTab = dialog?.tabId ? tabs.find((entry) => entry.id === dialog.tabId) : null;
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: `qh-root${editing ? " qh-editing" : ""}`, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(Wallpaper, { state, setState, t }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-scroll", ref: scrollRef, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-main", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-hero", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ClockLine, { t, now }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h1", { className: "qh-headline", children: state.headline.trim() || t("hero.headline") }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-search-row", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(SessionSearch, { t, services }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("button", { type: "button", className: "qh-action-btn qh-primary", onClick: () => services.uiWorkspace?.startSession?.(), children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconPlus, { size: 14 }),
-            t("search.newSession")
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: `qh-root${editing ? " qh-editing" : ""}`, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Wallpaper, { state, setState, t }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-scroll", ref: scrollRef, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-main", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-hero", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ClockLine, { t, now }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h1", { className: "qh-headline", children: state.headline.trim() || t("hero.headline") }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-search-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(SessionSearch, { t, services }),
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-split", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("button", { type: "button", className: `qh-action-btn qh-primary${providerState.actions.length ? " qh-new" : ""}`, onClick: () => services.uiWorkspace?.startSession?.(), children: [
+              /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconPlus, { size: 14 }),
+              t("search.newSession")
+            ] }),
+            providerState.actions.length ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-action-btn qh-new-more", "aria-label": t("provider.actions"), "aria-haspopup": "menu", onClick: (event) => openMenu(event, providerState.actions.map((action) => ({ label: action.label, icon: (props) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ProviderIcon, { name: action.icon, ...props }), onSelect: () => void Promise.resolve().then(action.run).catch((e) => push(e.message || t("search.error"))) }))), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconArrowDown, { size: 14 }) }) : null
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
             "button",
             {
               type: "button",
@@ -3539,18 +3786,18 @@ function HomePage({ t, store, services }) {
                 }
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconFolder, { size: 14 }),
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconFolder, { size: 14 }),
                 t("search.openWorkspace")
               ]
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-search-hint", children: t("search.hint") })
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-search-hint", children: t("search.hint") })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "qh-tabs-row", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-tabs-list", role: "tablist", "aria-label": t("pages.label"), children: tabs.map((entry, index) => {
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("div", { className: "qh-tabs-row", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-tabs-list", role: "tablist", "aria-label": t("pages.label"), children: tabs.map((entry, index) => {
           const selected = entry.id === tab.id;
-          return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
             "button",
             {
               id: `qh-tab-${entry.id}`,
@@ -3571,27 +3818,27 @@ function HomePage({ t, store, services }) {
             entry.id
           );
         }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("pages.add"), title: t("pages.add"), onClick: () => setDialog({ type: "newTab" }), children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconPlus, { size: 14 }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("pages.menu"), title: t("pages.menu"), "aria-haspopup": "menu", onClick: (event) => tabMenu(event, tab.id), children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconMore, { size: 14 }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "qh-tabs-spacer" }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("library.title"), title: t("library.title"), onClick: () => setDialog({ type: "library", tabId: tab.id }), children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconGrid, { size: 14 }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("settings.appearance"), title: t("settings.appearance"), onClick: () => setDialog({ type: "appearance" }), children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconImage, { size: 14 }) }),
-        editing ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("button", { type: "button", className: "qh-action-btn qh-primary qh-done-btn", "aria-pressed": "true", onClick: () => {
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("pages.add"), title: t("pages.add"), onClick: () => setDialog({ type: "newTab" }), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconPlus, { size: 14 }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("pages.menu"), title: t("pages.menu"), "aria-haspopup": "menu", onClick: (event) => tabMenu(event, tab.id), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconMore, { size: 14 }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { className: "qh-tabs-spacer" }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("library.title"), title: t("library.title"), onClick: () => setDialog({ type: "library", tabId: tab.id }), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconGrid, { size: 14 }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("settings.appearance"), title: t("settings.appearance"), onClick: () => setDialog({ type: "appearance" }), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconImage, { size: 14 }) }),
+        editing ? /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("button", { type: "button", className: "qh-action-btn qh-primary qh-done-btn", "aria-pressed": "true", onClick: () => {
           endDrag();
           setEditing(false);
         }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconCheck, { size: 14 }),
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconCheck, { size: 14 }),
           t("layout.done")
-        ] }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("layout.customize"), title: t("layout.customize"), "aria-pressed": "false", onClick: () => setEditing(true), children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(IconSettings, { size: 14 }) })
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-icon-btn", "aria-label": t("layout.customize"), title: t("layout.customize"), "aria-pressed": "false", onClick: () => setEditing(true), children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(IconSettings, { size: 14 }) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-grid", id: "qh-panel", ref: gridRef, role: "tabpanel", "aria-labelledby": `qh-tab-${tab.id}`, children: tab.cards.length ? tab.cards.map(renderCard) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", className: "qh-empty-tab", onClick: () => setDialog({ type: "library", tabId: tab.id }), children: t("settings.emptyTab") }) }),
-      editing ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "qh-edit-hint", children: t("layout.editHint") }) : null
+      /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-grid", id: "qh-panel", ref: gridRef, role: "tabpanel", "aria-labelledby": `qh-tab-${tab.id}`, children: tab.cards.length ? tab.cards.map(renderCard) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("button", { type: "button", className: "qh-empty-tab", onClick: () => setDialog({ type: "library", tabId: tab.id }), children: t("settings.emptyTab") }) }),
+      editing ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { className: "qh-edit-hint", children: t("layout.editHint") }) : null
     ] }) }),
     menu,
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "qh-sr-only", "aria-live": "polite", children: announce }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ToastHost, { toasts, dismiss }),
-    dialog?.type === "newTab" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(NewTabDialog, { t, onCreate: createTab, onClose: closeDialog }) : null,
-    dialog?.type === "library" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("div", { className: "qh-sr-only", "aria-live": "polite", children: announce }),
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ToastHost, { toasts, dismiss }),
+    dialog?.type === "newTab" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(NewTabDialog, { t, onCreate: createTab, onClose: closeDialog }) : null,
+    dialog?.type === "library" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       LibraryDialog,
       {
         t,
@@ -3604,7 +3851,7 @@ function HomePage({ t, store, services }) {
         onClose: closeDialog
       }
     ) : null,
-    dialog?.type === "rename" && dialogTab ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "rename" && dialogTab ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       PromptDialog,
       {
         t,
@@ -3619,7 +3866,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "duplicate" && dialogTab ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "duplicate" && dialogTab ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       PromptDialog,
       {
         t,
@@ -3635,7 +3882,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "delete" && dialogTab ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "delete" && dialogTab ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       ConfirmDialog,
       {
         t,
@@ -3653,7 +3900,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "cardSettings" && tab.cards.includes(dialog.cardId) ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "cardSettings" && tab.cards.includes(dialog.cardId) ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       CardSettingsDialog,
       {
         t,
@@ -3663,7 +3910,7 @@ function HomePage({ t, store, services }) {
         onChange: (patch) => setState({ tabs: setCardOptions(tabs, tab.id, dialog.cardId, patch) })
       }
     ) : null,
-    dialog?.type === "moveCard" && tab.cards.includes(dialog.cardId) ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "moveCard" && tab.cards.includes(dialog.cardId) ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       MoveCardDialog,
       {
         t,
@@ -3680,7 +3927,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "shortcut" && state.shortcutGroups.some((entry) => entry.id === dialog.groupId) ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "shortcut" && state.shortcutGroups.some((entry) => entry.id === dialog.groupId) ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       ShortcutDialog,
       {
         t,
@@ -3698,7 +3945,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "newGroup" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "newGroup" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       PromptDialog,
       {
         t,
@@ -3714,7 +3961,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "renameGroup" && state.shortcutGroups.some((entry) => entry.id === dialog.groupId) ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "renameGroup" && state.shortcutGroups.some((entry) => entry.id === dialog.groupId) ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       PromptDialog,
       {
         t,
@@ -3729,7 +3976,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "deleteGroup" && state.shortcutGroups.some((entry) => entry.id === dialog.groupId) ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "deleteGroup" && state.shortcutGroups.some((entry) => entry.id === dialog.groupId) ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       ConfirmDialog,
       {
         t,
@@ -3748,7 +3995,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "import" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "import" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       ImportBookmarksDialog,
       {
         t,
@@ -3760,7 +4007,7 @@ function HomePage({ t, store, services }) {
         }
       }
     ) : null,
-    dialog?.type === "appearance" ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+    dialog?.type === "appearance" ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       AppearanceDialog,
       {
         t,
@@ -3916,6 +4163,9 @@ var CSS = `
   backdrop-filter: blur(12px);
   transition: background 0.15s ease, color 0.15s ease;
 }
+.qh-split { display:flex; }
+.qh-root .qh-split .qh-new { border-top-right-radius:0; border-bottom-right-radius:0; }
+.qh-root .qh-split .qh-new-more { margin-left:-1px; padding:0 10px; border-top-left-radius:0; border-bottom-left-radius:0; color:var(--qh-text-2); }
 .qh-action-btn:hover { background: rgba(34, 46, 40, 0.8); color: var(--qh-text); }
 .qh-action-btn.qh-primary { color: var(--qh-accent); }
 
@@ -4467,6 +4717,8 @@ var CSS_EXTRA = `
 
 // src/client/locale.js
 var zh = {
+  "provider.actions": "\u66F4\u591A\u64CD\u4F5C",
+  "provider.unavailable": "\u63D2\u4EF6\u6682\u672A\u8FDE\u63A5\uFF1B\u5E03\u5C40\u5DF2\u4FDD\u7559\u3002",
   "panel.title": "\u4E3B\u9875",
   "hero.headline": "\u4ECA\u5929\uFF0C\u4ECE\u4E00\u4EF6\u5C0F\u4E8B\u5F00\u59CB\u3002",
   "hero.greeting.morning": "\u65E9\u4E0A\u597D",
@@ -4771,6 +5023,8 @@ var zh = {
   "date.weekdays": "\u4E00 \u4E8C \u4E09 \u56DB \u4E94 \u516D \u65E5"
 };
 var en = {
+  "provider.actions": "More actions",
+  "provider.unavailable": "Plugin is disconnected. Your layout is retained.",
   "panel.title": "Home",
   "hero.headline": "Start with one small thing.",
   "hero.greeting.morning": "Good morning",
@@ -5082,7 +5336,7 @@ var inject = ["slots", "locale", "sessions", "workspaces", "uiWorkspace"];
 function injectStyles() {
   const tagId = "qiaomu-home-dsh/page.css";
   if (typeof document === "undefined") return;
-  const content = CSS + CSS_EXTRA;
+  const content = CSS + CSS_EXTRA + PROVIDER_CSS;
   const existing = document.querySelector(`style[data-plugin-css=${JSON.stringify(tagId)}]`);
   if (existing !== null) {
     if (existing.textContent !== content) existing.textContent = content;
@@ -5095,7 +5349,7 @@ function injectStyles() {
   document.head.appendChild(tag);
 }
 function PanelIcon({ size }) {
-  return import_react7.default.createElement(IconHome, { size: size ?? 18 });
+  return import_react9.default.createElement(IconHome, { size: size ?? 18 });
 }
 PanelIcon.displayName = "QiaomuHomePanelIcon";
 function apply(ctx) {
@@ -5106,7 +5360,11 @@ function apply(ctx) {
     return ctx.locale.register(NS, { zh, en });
   }, "qiaomu-home: \u5B57\u5178");
   const store = createHomeStore();
+  const providers = createProviderRegistry();
+  ctx.effect(() => ctx.provide("qiaomuHome", providers));
+  ctx.effect(() => () => providers.dispose());
   const services = {
+    providers,
     sessions: ctx.get?.("sessions") ?? ctx.sessions,
     workspaces: ctx.get?.("workspaces") ?? ctx.workspaces,
     uiWorkspace: ctx.get?.("uiWorkspace") ?? ctx.uiWorkspace

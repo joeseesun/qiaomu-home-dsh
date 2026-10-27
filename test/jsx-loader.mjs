@@ -2,10 +2,10 @@
 import { transformSync } from 'esbuild';
 
 export async function load(url, context, nextLoad) {
-  if (url.endsWith('.jsx')) {
+  if (url.endsWith('.jsx') || url.endsWith('.ts')) {
     const source = (await nextLoad(url, { ...context, format: 'module' })).source;
     const { code } = transformSync(source.toString(), {
-      loader: 'jsx',
+      loader: url.endsWith('.ts') ? 'ts' : 'jsx',
       jsx: 'automatic',
       format: 'esm',
       target: 'node20',

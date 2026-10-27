@@ -4,6 +4,7 @@
  * 分类与「只看未添加」在本次会话内记忆。
  */
 import React from 'react';
+import {emptyProviderStore} from './providers.js';
 import { CARD_CATALOG, CATEGORIES, addCard, removeCard } from './layout.js';
 import { groupCardId } from './shortcuts.js';
 import { Modal } from './ui.jsx';
@@ -43,6 +44,7 @@ export function previewLines(id, { state, services }) {
 }
 
 export function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, onClose, tabName }) {
+  const registry=services?.providers||emptyProviderStore;const providerState=React.useSyncExternalStore(registry.subscribe,registry.getSnapshot,registry.getSnapshot);
   const [targetId, setTargetId] = useState(tabId);
   const [query, setQuery] = useState('');
   const [category, setCategoryState] = useState(remembered.category);
@@ -71,8 +73,9 @@ export function LibraryDialog({ t, state, services, tabId, onLayout, onCommand, 
       { id: '__newGroup', action: 'newGroup', category: 'links', title: t('shortcuts.newGroup'), description: t('shortcuts.newGroupDesc'), icon: IconPlus, elsewhere: [], preview: [] },
       { id: '__import', action: 'import', category: 'links', title: t('import.title'), description: t('import.desc'), icon: IconFolder, elsewhere: [], preview: [] },
     ];
-    return [...catalog, ...groups, ...actions];
-  }, [state, services, target, t, tabName]);
+    const plugins=providerState.sections.map(section=>({id:section.cardId,category:'dsh',title:section.title,description:section.description,...place(section.cardId),preview:take(section.items.map(item=>item.title)),icon:IconGrid}));
+    return [...catalog, ...plugins, ...groups, ...actions];
+  }, [state, services, target, t, tabName,providerState]);
 
   const searched = modules.filter((card) => (!onlyNew || !card.added)
     && `${card.title} ${card.description} ${card.preview.join(' ')} ${t(`settings.category.${card.category}`)}`.toLocaleLowerCase().includes(needle));

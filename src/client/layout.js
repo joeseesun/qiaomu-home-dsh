@@ -1,3 +1,4 @@
+import {isProviderCard} from './providers.js';
 import { groupIdOf, isGroupCard } from './shortcuts.js';
 
 /**
@@ -33,7 +34,7 @@ export const CARD_CATALOG = [
 const CARD_BY_ID = new Map(CARD_CATALOG.map((card) => [card.id, card]));
 const CARD_IDS = new Set(CARD_BY_ID.keys());
 /** 目录组件，或快捷入口分组卡片（shortcut:<id>）。 */
-const isKnownCard = (id) => CARD_IDS.has(id) || isGroupCard(id);
+const isKnownCard = (id) => CARD_IDS.has(id) || isGroupCard(id) || isProviderCard(id);
 
 export const cardMeta = (id) => CARD_BY_ID.get(id);
 

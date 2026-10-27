@@ -12,6 +12,8 @@
  */
 import React from 'react';
 
+import {createProviderRegistry} from './providers.js';
+import {PROVIDER_CSS} from './provider-css.js';
 import { HomePage } from './page.jsx';
 import { createHomeStore } from './store.js';
 import { CSS, CSS_EXTRA } from './styles.js';
@@ -32,7 +34,7 @@ export const inject = ['slots', 'locale', 'sessions', 'workspaces', 'uiWorkspace
 function injectStyles() {
   const tagId = 'qiaomu-home-dsh/page.css';
   if (typeof document === 'undefined') return;
-  const content = CSS + CSS_EXTRA;
+  const content = CSS + CSS_EXTRA + PROVIDER_CSS;
   const existing = document.querySelector(`style[data-plugin-css=${JSON.stringify(tagId)}]`);
   if (existing !== null) {
     if (existing.textContent !== content) existing.textContent = content;
@@ -64,9 +66,13 @@ export function apply(ctx) {
   }, 'qiaomu-home: 字典');
 
   const store = createHomeStore();
+  const providers=createProviderRegistry();
+  ctx.effect(()=>ctx.provide("qiaomuHome",providers));
+  ctx.effect(()=>()=>providers.dispose());
 
   /** 传给页面的服务面：组件内全部判空调用。 */
   const services = {
+    providers,
     sessions: ctx.get?.('sessions') ?? ctx.sessions,
     workspaces: ctx.get?.('workspaces') ?? ctx.workspaces,
     uiWorkspace: ctx.get?.('uiWorkspace') ?? ctx.uiWorkspace,

@@ -4,6 +4,8 @@
  */
 
 export const zh = {
+  "provider.actions":"更多操作",
+  "provider.unavailable":"插件暂未连接；布局已保留。",
   'panel.title': '主页',
   'hero.headline': '今天，从一件小事开始。',
   'hero.greeting.morning': '早上好',
@@ -309,6 +311,8 @@ export const zh = {
 };
 
 export const en = {
+  "provider.actions":"More actions",
+  "provider.unavailable":"Plugin is disconnected. Your layout is retained.",
   'panel.title': 'Home',
   'hero.headline': 'Start with one small thing.',
   'hero.greeting.morning': 'Good morning',
