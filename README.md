@@ -1,5 +1,7 @@
 # 乔木 Home · DeepSeek Harness 起点页
 
+> v0.3.1：DeepSeek Harness **0.2.1-rc.3** 兼容更新。[本次验证范围](docs/RC3-COMPATIBILITY.md)。
+
 **中文** · [English](#english)
 
 每天打开 DeepSeek Harness，先看见该继续的事：找回会话、记下今日重点，然后开始工作。  
@@ -9,7 +11,7 @@
 
 ![乔木 Home 的界面示意：问候、会话搜索、今日重点、待办、最近会话与常用入口](docs/assets/home-preview.svg)
 
-> **图为按当前组件结构绘制的界面示意，并非运行截图。** 本仓库提供源码与本地安装方式；尚未发布到 DSH 插件市场。当前验证包括构建、自动化测试和桌面 profile 安装，真实客户端界面仍待重启复核。
+> **图为按当前组件结构绘制的界面示意，并非运行截图。** 本仓库提供源码与本地安装方式；尚未发布到 DSH 插件市场。v0.3.1 已在独立 rc3 profile 验证真实主页和待办交互，详见本次验证记录。
 
 ## 为什么做这个插件
 
@@ -47,6 +49,15 @@ DeepSeek Harness 的会话、工作区和插件入口散落在不同位置。乔
 5. 点击 Tab 栏右侧的「组件库」添加组件，或点齿轮进入布置模式拖动排序；也可用 `+` 从模板新建 Tab。
 
 ## 安装
+
+下载 [v0.3.1 预构建包](https://github.com/joeseesun/qiaomu-home-dsh/releases/tag/v0.3.1) 中的 tgz 和 SHA256SUMS，校验后执行：
+
+```bash
+shasum -a 256 -c SHA256SUMS
+dsh plugin --profile desktop add /absolute/path/qiaomu-home-dsh-0.3.1.tgz
+```
+
+Web 用户将 `desktop` 换成 `web`，随后重载对应 profile。下面是开发者源码安装方式。
 
 **前提：** 已安装 DeepSeek Harness，且可以在本地 profile 中安装 bundle。这个仓库是源码仓库，不是 npm 发布包。
 
@@ -101,7 +112,7 @@ npm test       # 纯逻辑、组件渲染和插件注册测试
 
 `client.js` 是 DSH 加载的构建产物，应与源码一起提交。`index.js` 是宿主入口；`src/client/` 包含页面、卡片、状态、字典和样式；`cordis.patch.yml` 声明宿主插件行。CI 在 pull request 和 `main` 推送时运行构建与测试。
 
-**验证范围：** 源码在本地通过构建和 21 项测试；桌面 profile 已安装本地包。真实 DSH 客户端中的入口、截图、交互和重启后的加载尚未作为本仓库的发布证据。移动端和跨设备同步未验证。
+**验证范围：** v0.3.1 通过构建和 50 项测试，并在独立 rc3 profile 完成主页与待办交互验收。移动端和跨设备同步未验证。详见 [rc3 验证记录](docs/RC3-COMPATIBILITY.md)。
 
 ## 参与和许可
 
@@ -143,7 +154,7 @@ In DSH, ask its plugin manager to run `install_bundle` with the clone's absolute
 
 Personal Home data stays in this DSH browser environment's `localStorage` under the retained key `dsh-qiaomu-home:v1`; it does not sync across devices or workspaces. Conversation search uses DSH's local service. Wallpapers contact Unsplash, shortcut favicons contact DuckDuckGo Icons, and weather contacts Open-Meteo (geocoding and forecast) only after you search for or pick a place. External searches open only when submitted. Ambient noise is generated locally.
 
-Local verification covers the build, automated tests, and installation into a desktop profile. A fresh in-app reload, real screenshot, and mobile behavior remain unverified. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the [GPL-3.0-only license](LICENSE).
+Local verification covers the build, automated tests, and installation into a desktop profile. Version 0.3.1 also verifies the real Home screen and task interaction in an isolated rc3 profile. Mobile behavior remains unverified. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the [GPL-3.0-only license](LICENSE).
 
 ## 0.3.0：原版 Home 插件联动
 
