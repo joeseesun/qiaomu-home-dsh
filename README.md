@@ -1,6 +1,6 @@
 # 乔木 Home · DeepSeek Harness 起点页
 
-> v0.3.1：DeepSeek Harness **0.2.1-rc.3** 兼容更新。[本次验证范围](docs/RC3-COMPATIBILITY.md)。
+> v0.3.2：DeepSeek Harness **0.2.1-rc.3** 兼容更新。[本次验证范围](docs/RC3-COMPATIBILITY.md)。
 
 **中文** · [English](#english)
 
@@ -11,7 +11,7 @@
 
 ![乔木 Home 的界面示意：问候、会话搜索、今日重点、待办、最近会话与常用入口](docs/assets/home-preview.svg)
 
-> **图为按当前组件结构绘制的界面示意，并非运行截图。** 本仓库提供源码与本地安装方式；尚未发布到 DSH 插件市场。v0.3.1 已在独立 rc3 profile 验证真实主页和待办交互，详见本次验证记录。
+> **图为按当前组件结构绘制的界面示意，并非运行截图。** 本仓库提供源码与本地安装方式；尚未发布到 DSH 插件市场。v0.3.2 已在独立 rc3 profile 验证真实主页和待办交互，详见本次验证记录。
 
 ## 为什么做这个插件
 
@@ -50,11 +50,11 @@ DeepSeek Harness 的会话、工作区和插件入口散落在不同位置。乔
 
 ## 安装
 
-下载 [v0.3.1 预构建包](https://github.com/joeseesun/qiaomu-home-dsh/releases/tag/v0.3.1) 中的 tgz 和 SHA256SUMS，校验后执行：
+下载 [v0.3.2 预构建包](https://github.com/joeseesun/qiaomu-home-dsh/releases/tag/v0.3.2) 中的 tgz 和 SHA256SUMS，校验后执行：
 
 ```bash
 shasum -a 256 -c SHA256SUMS
-dsh plugin --profile desktop add /absolute/path/qiaomu-home-dsh-0.3.1.tgz
+dsh plugin --profile desktop add /absolute/path/qiaomu-home-dsh-0.3.2.tgz
 ```
 
 Web 用户将 `desktop` 换成 `web`，随后重载对应 profile。下面是开发者源码安装方式。
@@ -112,7 +112,7 @@ npm test       # 纯逻辑、组件渲染和插件注册测试
 
 `client.js` 是 DSH 加载的构建产物，应与源码一起提交。`index.js` 是宿主入口；`src/client/` 包含页面、卡片、状态、字典和样式；`cordis.patch.yml` 声明宿主插件行。CI 在 pull request 和 `main` 推送时运行构建与测试。
 
-**验证范围：** v0.3.1 通过构建和 50 项测试，并在独立 rc3 profile 完成主页与待办交互验收。移动端和跨设备同步未验证。详见 [rc3 验证记录](docs/RC3-COMPATIBILITY.md)。
+**验证范围：** v0.3.2 通过构建和 50 项测试，并在独立 rc3 profile 完成主页与待办交互验收。移动端和跨设备同步未验证。详见 [rc3 验证记录](docs/RC3-COMPATIBILITY.md)。
 
 ## 参与和许可
 
@@ -154,7 +154,7 @@ In DSH, ask its plugin manager to run `install_bundle` with the clone's absolute
 
 Personal Home data stays in this DSH browser environment's `localStorage` under the retained key `dsh-qiaomu-home:v1`; it does not sync across devices or workspaces. Conversation search uses DSH's local service. Wallpapers contact Unsplash, shortcut favicons contact DuckDuckGo Icons, and weather contacts Open-Meteo (geocoding and forecast) only after you search for or pick a place. External searches open only when submitted. Ambient noise is generated locally.
 
-Local verification covers the build, automated tests, and installation into a desktop profile. Version 0.3.1 also verifies the real Home screen and task interaction in an isolated rc3 profile. Mobile behavior remains unverified. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the [GPL-3.0-only license](LICENSE).
+Local verification covers the build, automated tests, and installation into a desktop profile. Version 0.3.2 also verifies the real Home screen and task interaction in an isolated rc3 profile. Mobile behavior remains unverified. See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the [GPL-3.0-only license](LICENSE).
 
 ## 0.3.0：原版 Home 插件联动
 
@@ -163,3 +163,5 @@ Local verification covers the build, automated tests, and installation into a de
 已与 `qiaomu-ui-learn-dsh` 验证最近设计、全局检索和原版详情跳转；其他插件提供相同协议即可接入。独立来源超时或出错不会阻断主页。新增协议和渲染检查后，共 50 项测试通过。
 
 Native integrations register a provider using `ctx.inject(['qiaomuHome'], ctx => ctx.effect(() => ctx.qiaomuHome.register('my-plugin', provider)))`. The provider follows the original `qiaomu-home` v1 sections/actions/search contract. An optional `subscribe(listener)` returns its cleanup function. Registrations and subscriptions are removed with their owning plugin; saved card IDs remain available for reconnection.
+
+本次 Harness rc.5 支持范围与实测边界见 [兼容验证记录](docs/RC5-COMPATIBILITY.md)。

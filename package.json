@@ -1,10 +1,10 @@
 {
   "name": "qiaomu-home-dsh",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "engines": {
-    "dsh": "0.2.1-rc.2 || 0.2.1-rc.3"
+    "dsh": "0.2.1-rc.2 || 0.2.1-rc.3 || 0.2.1-rc.4 || 0.2.1-rc.5"
   },
   "description": "乔木 Home：DeepSeek Harness 的起点页插件——壁纸与问候、会话搜索、今日待办、最近会话、常用入口、专注计时、时间进度、世界时钟、每日一句与天气。",
   "exports": {
