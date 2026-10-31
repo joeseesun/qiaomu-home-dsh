@@ -163,3 +163,5 @@ Local verification covers the build, automated tests, and installation into a de
 已与 `qiaomu-ui-learn-dsh` 验证最近设计、全局检索和原版详情跳转；其他插件提供相同协议即可接入。独立来源超时或出错不会阻断主页。新增协议和渲染检查后，共 50 项测试通过。
 
 Native integrations register a provider using `ctx.inject(['qiaomuHome'], ctx => ctx.effect(() => ctx.qiaomuHome.register('my-plugin', provider)))`. The provider follows the original `qiaomu-home` v1 sections/actions/search contract. An optional `subscribe(listener)` returns its cleanup function. Registrations and subscriptions are removed with their owning plugin; saved card IDs remain available for reconnection.
+
+本次 Harness rc.5 支持范围与实测边界见 [兼容验证记录](docs/RC5-COMPATIBILITY.md)。
