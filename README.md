@@ -1,6 +1,6 @@
 # 乔木 Home · DeepSeek Harness 起点页
 
-> v0.3.3：DeepSeek Harness **0.2.1-rc.3** 兼容更新。[本次验证范围](docs/RC3-COMPATIBILITY.md)。
+> v0.3.3：DeepSeek Harness **0.2.2-rc.1** 兼容更新。[本次验证范围](docs/DSH-0.2.2-RC1.md)。
 
 **中文** · [English](#english)
 
