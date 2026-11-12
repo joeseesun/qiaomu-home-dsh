@@ -120,7 +120,7 @@ export function loadState(storage = globalThis.localStorage) {
  * 创建状态容器。
  * @param {object} storage - localStorage 兼容对象（测试可传内存桩）。
  */
-export function createHomeStore(storage = globalThis.localStorage) {
+export function createHomeStore(storage = globalThis.localStorage, lifecycle = globalThis) {
   let state = loadState(storage);
   const listeners = new Set();
   let writeTimer = 0;
@@ -139,6 +139,14 @@ export function createHomeStore(storage = globalThis.localStorage) {
     writeTimer = setTimeout(flush, 300);
   };
 
+  const flushPending = () => {
+    if (writeTimer) {
+      clearTimeout(writeTimer);
+      flush();
+    }
+  };
+  lifecycle.addEventListener?.('pagehide', flushPending);
+
   return {
     getSnapshot: () => state,
     subscribe(fn) {
@@ -152,11 +160,11 @@ export function createHomeStore(storage = globalThis.localStorage) {
       for (const fn of listeners) fn();
     },
     /** 立即写盘（关闭页面前调用）。 */
-    flush() {
-      if (writeTimer) {
-        clearTimeout(writeTimer);
-        flush();
-      }
+    flush: flushPending,
+    dispose() {
+      flushPending();
+      lifecycle.removeEventListener?.('pagehide', flushPending);
+      listeners.clear();
     },
     /** 回到默认状态。 */
     reset() {

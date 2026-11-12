@@ -3254,7 +3254,7 @@ function loadState(storage = globalThis.localStorage) {
     return base;
   }
 }
-function createHomeStore(storage = globalThis.localStorage) {
+function createHomeStore(storage = globalThis.localStorage, lifecycle = globalThis) {
   let state = loadState(storage);
   const listeners = /* @__PURE__ */ new Set();
   let writeTimer = 0;
@@ -3269,6 +3269,13 @@ function createHomeStore(storage = globalThis.localStorage) {
     if (writeTimer) return;
     writeTimer = setTimeout(flush, 300);
   };
+  const flushPending = () => {
+    if (writeTimer) {
+      clearTimeout(writeTimer);
+      flush();
+    }
+  };
+  lifecycle.addEventListener?.("pagehide", flushPending);
   return {
     getSnapshot: () => state,
     subscribe(fn) {
@@ -3282,11 +3289,11 @@ function createHomeStore(storage = globalThis.localStorage) {
       for (const fn of listeners) fn();
     },
     /** 立即写盘（关闭页面前调用）。 */
-    flush() {
-      if (writeTimer) {
-        clearTimeout(writeTimer);
-        flush();
-      }
+    flush: flushPending,
+    dispose() {
+      flushPending();
+      lifecycle.removeEventListener?.("pagehide", flushPending);
+      listeners.clear();
     },
     /** 回到默认状态。 */
     reset() {
@@ -5360,6 +5367,7 @@ function apply(ctx) {
     return ctx.locale.register(NS, { zh, en });
   }, "qiaomu-home: \u5B57\u5178");
   const store = createHomeStore();
+  ctx.effect(() => () => store.dispose(), "qiaomu-home: persist before disposal");
   const providers = createProviderRegistry();
   ctx.effect(() => ctx.provide("qiaomuHome", providers));
   ctx.effect(() => () => providers.dispose());
