@@ -587,6 +587,21 @@ test('书签解析对未闭合标签保持线性：2 MB 病态输入在合理时
   assert.equal(parseBookmarks('<A HREF="https://nested.dev/"><b>Bold</b> text</A>')[0].name, 'Bold text');
 });
 
+test('pending edits survive pagehide before the debounce and disposal removes the listener', () => {
+  const storage = memoryStorage();
+  const lifecycle = new EventTarget();
+  const store = createHomeStore(storage, lifecycle);
+  store.set({ headline: 'RC2 immediate reload' });
+  lifecycle.dispatchEvent(new Event('pagehide'));
+  assert.equal(loadState(storage).headline, 'RC2 immediate reload');
+  store.set({ headline: 'disposed edit' });
+  store.dispose();
+  assert.equal(loadState(storage).headline, 'disposed edit');
+  storage.setItem('dsh-qiaomu-home:v1', JSON.stringify({ ...store.getSnapshot(), headline: 'new owner' }));
+  lifecycle.dispatchEvent(new Event('pagehide'));
+  assert.equal(loadState(storage).headline, 'new owner');
+});
+
 test('masonry 行数按行高+间距换算，不能直接把卡片高度当行数', () => {
   const ROW = 1;
   const GAP = 14;

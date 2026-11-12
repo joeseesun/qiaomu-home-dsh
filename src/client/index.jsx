@@ -66,6 +66,7 @@ export function apply(ctx) {
   }, 'qiaomu-home: 字典');
 
   const store = createHomeStore();
+  ctx.effect(() => () => store.dispose(), 'qiaomu-home: persist before disposal');
   const providers=createProviderRegistry();
   ctx.effect(()=>ctx.provide("qiaomuHome",providers));
   ctx.effect(()=>()=>providers.dispose());
